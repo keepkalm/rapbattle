@@ -1,19 +1,22 @@
 /**
- * rapbattle.lol – main Worker
- * Public UI + MCP server + audio
+ * rapbattle.lol
+ * Public UI + MCP OAuth 2.1 + audio
  */
 
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
 import { renderHome, renderBattle, renderLeaderboard } from "./ui";
+import { handleAuthorize, type AuthProps, type Env as AuthEnv } from "./auth";
 
 export { BattleDO };
 
-export interface Env {
+export interface Env extends AuthEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
   BATTLE: DurableObjectNamespace;
+  OAUTH_KV: KVNamespace;
 }
 
 async function serveAudio(request: Request, env: Env): Promise<Response> {
@@ -37,66 +40,69 @@ async function serveAudio(request: Request, env: Env): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
-async function mcpHandler(request: Request, env: Env, origin: string): Promise<Response> {
-  const url = new URL(request.url);
-
-  if (request.method === "GET" && url.pathname === "/mcp") {
-    return Response.json({
-      name: "rapbattle",
-      version: "0.1.0",
-      description: "Agent vs agent rap battles with voice",
-      tools: tools.map((t) => ({ name: t.name, description: t.description })),
-    });
-  }
-
-  if (request.method === "POST" && url.pathname === "/mcp/tools/list") {
-    return Response.json({ tools });
-  }
-
-  if (request.method === "POST" && url.pathname === "/mcp/tools/call") {
-    const body = (await request.json()) as {
-      name: string;
-      arguments?: Record<string, unknown>;
-    };
-    const result = await handleToolCall(body.name, body.arguments ?? {}, env, undefined, origin);
-    return Response.json({
-      content: [{ type: "text", text: JSON.stringify(result) }],
-    });
-  }
-
-  if (url.pathname === "/.well-known/oauth-protected-resource") {
-    return Response.json({
-      resource: new URL("/mcp", origin).toString(),
-      authorization_servers: [origin],
-      scopes_supported: ["mcp:battles", "mcp:react", "mcp:leaderboard"],
-      bearer_methods_supported: ["header"],
-    });
-  }
-
-  return new Response("Not found", { status: 404 });
-}
-
-export default {
+/** Authenticated MCP API (Bearer token required via OAuthProvider) */
+const apiHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
 
-    if (url.pathname.startsWith("/audio/")) {
-      return serveAudio(request, env);
+    // Optional: props from completed OAuth (agent identity)
+    // Available when using WorkerEntrypoint; with plain handler, tools still work with client-supplied agent_id
+
+    if (request.method === "GET" && (url.pathname === "/mcp" || url.pathname === "/mcp/")) {
+      return Response.json({
+        name: "rapbattle",
+        version: "0.2.0",
+        description: "Agent vs agent rap battles with voice (OAuth protected)",
+        tools: tools.map((t) => ({ name: t.name, description: t.description })),
+      });
     }
 
-    if (
-      url.pathname.startsWith("/mcp") ||
-      url.pathname === "/.well-known/oauth-protected-resource"
-    ) {
-      return mcpHandler(request, env, origin);
+    if (request.method === "POST" && url.pathname === "/mcp/tools/list") {
+      return Response.json({ tools });
+    }
+
+    if (request.method === "POST" && url.pathname === "/mcp/tools/call") {
+      const body = (await request.json()) as {
+        name: string;
+        arguments?: Record<string, unknown>;
+      };
+      const result = await handleToolCall(
+        body.name,
+        body.arguments ?? {},
+        env,
+        undefined,
+        origin
+      );
+      return Response.json({
+        content: [{ type: "text", text: JSON.stringify(result) }],
+      });
+    }
+
+    return new Response("Not found", { status: 404 });
+  },
+};
+
+/** Public site + OAuth authorize UI */
+const defaultHandler = {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const origin = url.origin;
+
+    if (url.pathname === "/authorize") {
+      return handleAuthorize(request, env);
+    }
+
+    if (url.pathname.startsWith("/audio/")) {
+      return serveAudio(request, env);
     }
 
     if (url.pathname === "/health") {
       return Response.json({
         service: "rapbattle.lol",
         status: "live",
-        message: "MCP + battles + voice",
+        auth: "mcp-oauth",
+        message: "MCP OAuth 2.1 + battles + voice",
       });
     }
 
@@ -116,3 +122,21 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 };
+
+export default new OAuthProvider({
+  apiRoute: ["/mcp"],
+  apiHandler,
+  defaultHandler,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/oauth/token",
+  clientRegistrationEndpoint: "/oauth/register",
+  scopesSupported: ["mcp:battles", "mcp:react", "mcp:leaderboard"],
+  clientIdMetadataDocumentEnabled: true,
+  resourceMetadata: {
+    resource: "https://rapbattle.lol/mcp",
+    authorization_servers: ["https://rapbattle.lol"],
+    scopes_supported: ["mcp:battles", "mcp:react", "mcp:leaderboard"],
+    resource_name: "rapbattle.lol",
+    bearer_methods_supported: ["header"],
+  },
+});
