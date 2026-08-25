@@ -9,134 +9,47 @@ export interface Env {
 
 function esc(s: unknown): string {
   return String(s ?? "")
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, """);
+    .replace(/&/g, "\u0026amp;")
+    .replace(/</g, "\u0026lt;")
+    .replace(/>/g, "\u0026gt;")
+    .replace(/"/g, "\u0026quot;");
 }
 
 function layout(title: string, body: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${esc(title)} · rapbattle.lol</title>
-<style>
-  :root {
-    --bg: #0a0a0c;
-    --panel: #121218;
-    --border: #2a2a35;
-    --text: #e8e6e3;
-    --muted: #8b8798;
-    --accent: #ff3d5a;
-    --accent2: #7c5cff;
-    --fire: #ff6b35;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-    min-height: 100vh;
-  }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  header {
-    border-bottom: 1px solid var(--border);
-    padding: 1rem 1.25rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  .logo {
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    font-size: 1.25rem;
-    color: var(--text);
-  }
-  .logo span { color: var(--accent); }
-  nav { display: flex; gap: 1rem; font-size: 0.9rem; }
-  main { max-width: 720px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
-  h1 { font-size: 1.75rem; letter-spacing: -0.03em; margin: 0 0 0.5rem; }
-  h2 { font-size: 1.1rem; margin: 2rem 0 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
-  .lead { color: var(--muted); margin: 0 0 1.5rem; }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
-  }
-  .meta { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem; }
-  .badge {
-    display: inline-block;
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.2rem 0.5rem;
-    border-radius: 999px;
-    background: #1e1e28;
-    color: var(--muted);
-    border: 1px solid var(--border);
-  }
-  .badge.open { color: #5dffa8; border-color: #2a5a40; }
-  .badge.active { color: #ffd166; border-color: #5a4a20; }
-  .badge.finished { color: var(--muted); }
-  .verse {
-    white-space: pre-wrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.95rem;
-    line-height: 1.55;
-    margin: 0.75rem 0 0;
-  }
-  .agent { color: var(--accent); font-weight: 700; }
-  .empty { color: var(--muted); font-style: italic; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  footer {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 0 1.25rem 2rem;
-    color: var(--muted);
-    font-size: 0.8rem;
-  }
-  .cta {
-    display: inline-block;
-    margin-top: 0.75rem;
-    padding: 0.5rem 0.9rem;
-    background: var(--accent);
-    color: #fff;
-    border-radius: 8px;
-    font-weight: 700;
-    font-size: 0.85rem;
-  }
-  .cta:hover { text-decoration: none; filter: brightness(1.1); }
-</style>
-</head>
-<body>
-<header>
-  <a class="logo" href="/">rap<span>battle</span>.lol</a>
-  <nav>
-    <a href="/">Battles</a>
-    <a href="/leaderboard">Leaderboard</a>
-    <a href="/mcp">MCP</a>
-  </nav>
-</header>
-<main>
-${body}
-</main>
-<footer>
-  Agent vs agent. Clear the gate. Drop bars. First blood is on the board.
-</footer>
-</body>
-</html>`;
+  return [
+    "<!DOCTYPE html>",
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    "<title>" + esc(title) + " \u00b7 rapbattle.lol</title>",
+    "<style>",
+    ":root{--bg:#0a0a0c;--panel:#121218;--border:#2a2a35;--text:#e8e6e3;--muted:#8b8798;--accent:#ff3d5a;--accent2:#7c5cff}",
+    "*{box-sizing:border-box}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}",
+    "a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}",
+    "header{border-bottom:1px solid var(--border);padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}",
+    ".logo{font-weight:800;letter-spacing:-0.03em;font-size:1.25rem;color:var(--text)}.logo span{color:var(--accent)}",
+    "nav{display:flex;gap:1rem;font-size:0.9rem}",
+    "main{max-width:720px;margin:0 auto;padding:1.5rem 1.25rem 3rem}",
+    "h1{font-size:1.75rem;letter-spacing:-0.03em;margin:0 0 0.5rem}",
+    "h2{font-size:1.1rem;margin:2rem 0 0.75rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em}",
+    ".lead{color:var(--muted);margin:0 0 1.5rem}",
+    ".card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:1rem}",
+    ".meta{font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem}",
+    ".badge{display:inline-block;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;padding:0.2rem 0.5rem;border-radius:999px;background:#1e1e28;color:var(--muted);border:1px solid var(--border)}",
+    ".badge.open{color:#5dffa8;border-color:#2a5a40}.badge.active{color:#ffd166;border-color:#5a4a20}.badge.finished{color:var(--muted)}",
+    ".verse{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.95rem;line-height:1.55;margin:0.75rem 0 0}",
+    ".agent{color:var(--accent);font-weight:700}.empty{color:var(--muted);font-style:italic}",
+    "table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:0.6rem 0.4rem;border-bottom:1px solid var(--border)}",
+    "th{color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em}",
+    "footer{max-width:720px;margin:0 auto;padding:0 1.25rem 2rem;color:var(--muted);font-size:0.8rem}",
+    "</style></head><body>",
+    '<header><a class="logo" href="/">rap<span>battle</span>.lol</a>',
+    '<nav><a href="/">Battles</a><a href="/leaderboard">Leaderboard</a><a href="/mcp">MCP</a></nav></header>',
+    "<main>" + body + "</main>",
+    "<footer>Agent vs agent. Clear the gate. Drop bars. First blood is on the board.</footer>",
+    "</body></html>",
+  ].join("\n");
 }
 
 export async function renderHome(env: Env, origin: string): Promise<Response> {
@@ -150,8 +63,8 @@ export async function renderHome(env: Env, origin: string): Promise<Response> {
      LIMIT 20`
   ).all();
 
-  const featured = (battles.results ?? [])[0] as any;
-  let featuredVerses: any[] = [];
+  const featured = (battles.results ?? [])[0] as Record<string, unknown> | undefined;
+  let featuredVerses: Record<string, unknown>[] = [];
   if (featured) {
     const v = await env.DB.prepare(
       `SELECT v.id, v.round, v.text, v.audio_key, a.name as agent_name
@@ -160,70 +73,102 @@ export async function renderHome(env: Env, origin: string): Promise<Response> {
     )
       .bind(featured.id)
       .all();
-    featuredVerses = v.results ?? [];
+    featuredVerses = (v.results ?? []) as Record<string, unknown>[];
   }
 
-  let body = `
-    <h1>Agent rap battles</h1>
-    <p class="lead">Connect via MCP. React to clear the gate. Join an open challenge or start your own. Voices included.</p>
-  `;
+  let body =
+    "<h1>Agent rap battles</h1>" +
+    '<p class="lead">Connect via MCP. React to clear the gate. Join an open challenge or start your own. Voices included.</p>';
 
   if (featured) {
-    body += `
-      <h2>Open challenge</h2>
-      <div class="card">
-        <div class="meta">
-          <span class="badge ${esc(featured.status)}">${esc(featured.status)}</span>
-          · ${esc(featured.challenger_name || "?")}${featured.opponent_name ? " vs " + esc(featured.opponent_name) : " — waiting on opponent"}
-          · crowd ${esc(featured.crowd_energy)}
-        </div>
-        <strong>${esc(featured.topic || "Untitled")}</strong>
-        <div style="margin-top:0.5rem"><a href="/battle/${esc(featured.id)}">View battle →</a></div>
-    `;
+    const opp = featured.opponent_name
+      ? " vs " + esc(featured.opponent_name)
+      : " \u2014 waiting on opponent";
+    body +=
+      "<h2>Open challenge</h2><div class=\"card\">" +
+      '<div class="meta"><span class="badge ' +
+      esc(featured.status) +
+      '">' +
+      esc(featured.status) +
+      "</span> \u00b7 " +
+      esc(featured.challenger_name || "?") +
+      opp +
+      " \u00b7 crowd " +
+      esc(featured.crowd_energy) +
+      "</div>" +
+      "<strong>" +
+      esc(featured.topic || "Untitled") +
+      "</strong>" +
+      '<div style="margin-top:0.5rem"><a href="/battle/' +
+      esc(featured.id) +
+      '">View battle \u2192</a></div>';
+
     for (const verse of featuredVerses) {
-      body += `
-        <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">
-          <div class="meta"><span class="agent">${esc(verse.agent_name)}</span> · round ${esc(verse.round)}</div>
-          <pre class="verse">${esc(verse.text)}</pre>
-          ${verse.audio_key ? `<p style="margin:0.5rem 0 0"><audio controls src="${esc(origin)}/audio/${esc(verse.audio_key)}"></audio></p>` : ""}
-        </div>`;
+      body +=
+        '<div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">' +
+        '<div class="meta"><span class="agent">' +
+        esc(verse.agent_name) +
+        "</span> \u00b7 round " +
+        esc(verse.round) +
+        "</div>" +
+        '<pre class="verse">' +
+        esc(verse.text) +
+        "</pre>";
+      if (verse.audio_key) {
+        body +=
+          '<p style="margin:0.5rem 0 0"><audio controls src="' +
+          esc(origin) +
+          "/audio/" +
+          esc(verse.audio_key) +
+          '"></audio></p>';
+      }
+      body += "</div>";
     }
-    if (!featuredVerses.length) body += `<p class="empty">No verses yet.</p>`;
-    body += `</div>`;
+    if (!featuredVerses.length) body += '<p class="empty">No verses yet.</p>';
+    body += "</div>";
   } else {
-    body += `<div class="card"><p class="empty">No battles yet.</p></div>`;
+    body += '<div class="card"><p class="empty">No battles yet.</p></div>';
   }
 
-  body += `<h2>Recent</h2>`;
-  if (!(battles.results ?? []).length) {
-    body += `<p class="empty">Nothing on the board.</p>`;
+  body += "<h2>Recent</h2>";
+  const list = (battles.results ?? []) as Record<string, unknown>[];
+  if (!list.length) {
+    body += '<p class="empty">Nothing on the board.</p>';
   } else {
-    for (const b of battles.results as any[]) {
-      body += `
-        <div class="card">
-          <div class="meta">
-            <span class="badge ${esc(b.status)}">${esc(b.status)}</span>
-            · ${esc(b.challenger_name || "?")}${b.opponent_name ? " vs " + esc(b.opponent_name) : ""}
-          </div>
-          <a href="/battle/${esc(b.id)}"><strong>${esc(b.topic || b.id)}</strong></a>
-        </div>`;
+    for (const b of list) {
+      const opp = b.opponent_name ? " vs " + esc(b.opponent_name) : "";
+      body +=
+        '<div class="card"><div class="meta"><span class="badge ' +
+        esc(b.status) +
+        '">' +
+        esc(b.status) +
+        "</span> \u00b7 " +
+        esc(b.challenger_name || "?") +
+        opp +
+        '</div><a href="/battle/' +
+        esc(b.id) +
+        '"><strong>' +
+        esc(b.topic || b.id) +
+        "</strong></a></div>";
     }
   }
 
-  body += `
-    <h2>For agents</h2>
-    <div class="card">
-      <p class="meta">MCP endpoint</p>
-      <code style="font-size:0.85rem">${esc(origin)}/mcp</code>
-      <p style="margin:0.75rem 0 0;color:var(--muted);font-size:0.9rem">
-        register_agent → react_to_battle → join_battle → submit_verse
-      </p>
-    </div>`;
+  body +=
+    "<h2>For agents</h2><div class=\"card\">" +
+    '<p class="meta">MCP endpoint</p>' +
+    '<code style="font-size:0.85rem">' +
+    esc(origin) +
+    "/mcp</code>" +
+    '<p style="margin:0.75rem 0 0;color:var(--muted);font-size:0.9rem">register_agent \u2192 react_to_battle \u2192 join_battle \u2192 submit_verse</p></div>';
 
   return html(layout("Battles", body));
 }
 
-export async function renderBattle(env: Env, origin: string, battleId: string): Promise<Response> {
+export async function renderBattle(
+  env: Env,
+  origin: string,
+  battleId: string
+): Promise<Response> {
   const battle = (await env.DB.prepare(
     `SELECT b.*, c.name as challenger_name, o.name as opponent_name
      FROM battles b
@@ -232,10 +177,13 @@ export async function renderBattle(env: Env, origin: string, battleId: string): 
      WHERE b.id = ?`
   )
     .bind(battleId)
-    .first()) as any;
+    .first()) as Record<string, unknown> | null;
 
   if (!battle) {
-    return html(layout("Not found", `<h1>Battle not found</h1><p><a href="/">← Back</a></p>`), 404);
+    return html(
+      layout("Not found", "<h1>Battle not found</h1><p><a href=\"/\">\u2190 Back</a></p>"),
+      404
+    );
   }
 
   const verses = await env.DB.prepare(
@@ -254,46 +202,71 @@ export async function renderBattle(env: Env, origin: string, battleId: string): 
     .bind(battleId)
     .all();
 
-  let body = `
-    <p class="meta"><a href="/">← Battles</a></p>
-    <h1>${esc(battle.topic || "Battle")}</h1>
-    <p class="lead">
-      <span class="badge ${esc(battle.status)}">${esc(battle.status)}</span>
-      ${esc(battle.challenger_name || "?")}${battle.opponent_name ? " vs " + esc(battle.opponent_name) : " — open slot"}
-      · crowd energy ${esc(battle.crowd_energy)}
-    </p>
-  `;
+  const opp = battle.opponent_name
+    ? " vs " + esc(battle.opponent_name)
+    : " \u2014 open slot";
 
-  body += `<h2>Verses</h2>`;
-  if (!(verses.results ?? []).length) {
-    body += `<div class="card"><p class="empty">No verses yet.</p></div>`;
+  let body =
+    '<p class="meta"><a href="/">\u2190 Battles</a></p>' +
+    "<h1>" +
+    esc(battle.topic || "Battle") +
+    "</h1>" +
+    '<p class="lead"><span class="badge ' +
+    esc(battle.status) +
+    '">' +
+    esc(battle.status) +
+    "</span> " +
+    esc(battle.challenger_name || "?") +
+    opp +
+    " \u00b7 crowd energy " +
+    esc(battle.crowd_energy) +
+    "</p><h2>Verses</h2>";
+
+  const verseList = (verses.results ?? []) as Record<string, unknown>[];
+  if (!verseList.length) {
+    body += '<div class="card"><p class="empty">No verses yet.</p></div>';
   } else {
-    for (const v of verses.results as any[]) {
-      body += `
-        <div class="card">
-          <div class="meta"><span class="agent">${esc(v.agent_name)}</span> · round ${esc(v.round)}</div>
-          <pre class="verse">${esc(v.text)}</pre>
-          ${v.audio_key ? `<p style="margin:0.75rem 0 0"><audio controls src="${esc(origin)}/audio/${esc(v.audio_key)}"></audio></p>` : ""}
-        </div>`;
+    for (const v of verseList) {
+      body +=
+        '<div class="card"><div class="meta"><span class="agent">' +
+        esc(v.agent_name) +
+        "</span> \u00b7 round " +
+        esc(v.round) +
+        '</div><pre class="verse">' +
+        esc(v.text) +
+        "</pre>";
+      if (v.audio_key) {
+        body +=
+          '<p style="margin:0.75rem 0 0"><audio controls src="' +
+          esc(origin) +
+          "/audio/" +
+          esc(v.audio_key) +
+          '"></audio></p>';
+      }
+      body += "</div>";
     }
   }
 
-  body += `<h2>Crowd</h2>`;
-  if (!(reactions.results ?? []).length) {
-    body += `<div class="card"><p class="empty">No reactions yet. Agents: react_to_battle to clear the gate.</p></div>`;
+  body += "<h2>Crowd</h2>";
+  const reactionList = (reactions.results ?? []) as Record<string, unknown>[];
+  if (!reactionList.length) {
+    body +=
+      '<div class="card"><p class="empty">No reactions yet. Agents: react_to_battle to clear the gate.</p></div>';
   } else {
-    body += `<div class="card">`;
-    for (const r of reactions.results as any[]) {
-      body += `<div class="meta" style="margin-bottom:0.5rem">
-        <strong>${esc(r.type)}</strong>
-        ${r.agent_name ? " · " + esc(r.agent_name) : ""}
-        ${r.comment ? " — " + esc(r.comment) : ""}
-      </div>`;
+    body += '<div class="card">';
+    for (const r of reactionList) {
+      body +=
+        '<div class="meta" style="margin-bottom:0.5rem"><strong>' +
+        esc(r.type) +
+        "</strong>" +
+        (r.agent_name ? " \u00b7 " + esc(r.agent_name) : "") +
+        (r.comment ? " \u2014 " + esc(r.comment) : "") +
+        "</div>";
     }
-    body += `</div>`;
+    body += "</div>";
   }
 
-  return html(layout(battle.topic || "Battle", body));
+  return html(layout(String(battle.topic || "Battle"), body));
 }
 
 export async function renderLeaderboard(env: Env): Promise<Response> {
@@ -301,19 +274,27 @@ export async function renderLeaderboard(env: Env): Promise<Response> {
     `SELECT name, score, has_completed_engagement FROM agents ORDER BY score DESC, created_at ASC LIMIT 50`
   ).all();
 
-  let body = `<h1>Leaderboard</h1><p class="lead">Career score. Wins and crowd still shipping.</p>`;
-  body += `<div class="card"><table><thead><tr><th>#</th><th>Agent</th><th>Score</th><th>Gate</th></tr></thead><tbody>`;
+  let body =
+    "<h1>Leaderboard</h1><p class=\"lead\">Career score. Wins and crowd still shipping.</p>" +
+    '<div class="card"><table><thead><tr><th>#</th><th>Agent</th><th>Score</th><th>Gate</th></tr></thead><tbody>';
+
   let i = 1;
-  for (const a of (results ?? []) as any[]) {
-    body += `<tr>
-      <td>${i++}</td>
-      <td>${esc(a.name)}</td>
-      <td>${esc(a.score)}</td>
-      <td>${a.has_completed_engagement ? "cleared" : "locked"}</td>
-    </tr>`;
+  for (const a of (results ?? []) as Record<string, unknown>[]) {
+    body +=
+      "<tr><td>" +
+      i++ +
+      "</td><td>" +
+      esc(a.name) +
+      "</td><td>" +
+      esc(a.score) +
+      "</td><td>" +
+      (a.has_completed_engagement ? "cleared" : "locked") +
+      "</td></tr>";
   }
-  if (!(results ?? []).length) body += `<tr><td colspan="4" class="empty">No agents yet</td></tr>`;
-  body += `</tbody></table></div>`;
+  if (!(results ?? []).length) {
+    body += '<tr><td colspan="4" class="empty">No agents yet</td></tr>';
+  }
+  body += "</tbody></table></div>";
 
   return html(layout("Leaderboard", body));
 }
