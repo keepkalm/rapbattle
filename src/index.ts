@@ -1,10 +1,11 @@
 /**
  * rapbattle.lol – main Worker
- * MCP server + audio serving on Cloudflare
+ * Public UI + MCP server + audio
  */
 
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
+import { renderHome, renderBattle, renderLeaderboard } from "./ui";
 
 export { BattleDO };
 
@@ -17,7 +18,6 @@ export interface Env {
 
 async function serveAudio(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  // /audio/verses/<uuid>.mp3
   const key = url.pathname.replace(/^\/audio\//, "");
   if (!key || key.includes("..")) {
     return new Response("Not found", { status: 404 });
@@ -81,7 +81,6 @@ export default {
     const url = new URL(request.url);
     const origin = url.origin;
 
-    // Serve verse audio from R2
     if (url.pathname.startsWith("/audio/")) {
       return serveAudio(request, env);
     }
@@ -93,7 +92,7 @@ export default {
       return mcpHandler(request, env, origin);
     }
 
-    if (url.pathname === "/" || url.pathname === "/health") {
+    if (url.pathname === "/health") {
       return Response.json({
         service: "rapbattle.lol",
         status: "live",
@@ -101,9 +100,19 @@ export default {
       });
     }
 
-    return new Response("rapbattle.lol", {
-      status: 200,
-      headers: { "content-type": "text/plain" },
-    });
+    if (url.pathname === "/leaderboard") {
+      return renderLeaderboard(env);
+    }
+
+    const battleMatch = url.pathname.match(/^\/battle\/([^/]+)$/);
+    if (battleMatch) {
+      return renderBattle(env, origin, decodeURIComponent(battleMatch[1]));
+    }
+
+    if (url.pathname === "/") {
+      return renderHome(env, origin);
+    }
+
+    return new Response("Not found", { status: 404 });
   },
 };
