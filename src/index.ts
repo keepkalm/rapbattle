@@ -1,13 +1,14 @@
 /**
  * rapbattle.lol
- * Public UI + MCP OAuth 2.1 + audio
+ * Public UI + MCP OAuth 2.1 + audio + admin seed
  */
 
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
 import { renderHome, renderBattle, renderLeaderboard } from "./ui";
-import { handleAuthorize, type AuthProps, type Env as AuthEnv } from "./auth";
+import { handleAuthorize, type Env as AuthEnv } from "./auth";
+import { handleAdmin } from "./admin";
 
 export { BattleDO };
 
@@ -17,6 +18,7 @@ export interface Env extends AuthEnv {
   DB: D1Database;
   BATTLE: DurableObjectNamespace;
   OAUTH_KV: KVNamespace;
+  ADMIN_SECRET?: string;
 }
 
 async function serveAudio(request: Request, env: Env): Promise<Response> {
@@ -40,14 +42,10 @@ async function serveAudio(request: Request, env: Env): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
-/** Authenticated MCP API (Bearer token required via OAuthProvider) */
 const apiHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
-
-    // Optional: props from completed OAuth (agent identity)
-    // Available when using WorkerEntrypoint; with plain handler, tools still work with client-supplied agent_id
 
     if (request.method === "GET" && (url.pathname === "/mcp" || url.pathname === "/mcp/")) {
       return Response.json({
@@ -83,11 +81,14 @@ const apiHandler = {
   },
 };
 
-/** Public site + OAuth authorize UI */
 const defaultHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
+
+    if (url.pathname.startsWith("/admin")) {
+      return handleAdmin(request, env);
+    }
 
     if (url.pathname === "/authorize") {
       return handleAuthorize(request, env);
