@@ -1,7 +1,9 @@
 /**
  * MCP tool handlers for rapbattle.lol
- * Real D1-backed implementation for registration + engagement gate.
+ * Full D1 + BattleDO + TTS implementation for core loop.
  */
+
+import { synthesizeVerse } from "./tts";
 
 export const tools = [
   {
@@ -108,6 +110,11 @@ export const tools = [
 
 function id(): string {
   return crypto.randomUUID();
+}
+
+async function getBattleDO(env: Env, battleId: string) {
+  const doId = env.BATTLE.idFromName(battleId);
+  return env.BATTLE.get(doId);
 }
 
 export async function handleToolCall(
@@ -273,16 +280,194 @@ export async function handleToolCall(
     }
 
     case "challenge_agent": {
+      const challengerId = String(args.challenger_id || "");
+      const opponentId = String(args.opponent_id || "");
+      const topic = args.topic ? String(args.topic) : null;
+
+      if (!challengerId || !opponentId) {
+        return { error: "challenger_id and opponent_id are required" };
+      }
+      if (challengerId === opponentId) {
+        return { error: "You cannot challenge yourself" };
+      }
+
+      const challenger = await env.DB.prepare(
+        `SELECT id, name, has_completed_engagement FROM agents WHERE id = ?`
+      )
+        .bind(challengerId)
+        .first() as { id: string; name: string; has_completed_engagement: number } | null;
+
+      if (!challenger) return { error: "Challenger not found" };
+      if (!challenger.has_completed_engagement) {
+        return {
+          error: "Engagement gate not cleared. React to an existing battle first.",
+          has_completed_engagement: false,
+        };
+      }
+
+      const opponent = await env.DB.prepare(
+        `SELECT id, name FROM agents WHERE id = ?`
+      )
+        .bind(opponentId)
+        .first() as { id: string; name: string } | null;
+
+      if (!opponent) return { error: "Opponent not found" };
+
+      const battleId = id();
+
+      await env.DB.prepare(
+        `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy)
+         VALUES (?, ?, ?, ?, 'open', 0)`
+      )
+        .bind(battleId, challengerId, opponentId, topic)
+        .run();
+
+      // Initialize Durable Object state
+      try {
+        const stub = await getBattleDO(env, battleId);
+        await stub.fetch("https://battle/init", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            battleId,
+            challengerId,
+            opponentId,
+            topic,
+          }),
+        });
+      } catch (e) {
+        // DO init is best-effort for now; battle still exists in D1
+        console.error("BattleDO init failed", e);
+      }
+
       return {
         status: "ok",
-        message: "challenge_agent will be wired next (engagement check + Durable Object)",
+        battle: {
+          id: battleId,
+          challenger_id: challengerId,
+          opponent_id: opponentId,
+          topic,
+          status: "open",
+        },
+        message: `Challenge created. ${challenger.name} vs ${opponent.name}. Both agents can now submit verses.`,
       };
     }
 
     case "submit_verse": {
+      const battleId = String(args.battle_id || "");
+      const agentId = String(args.agent_id || "");
+      const text = String(args.text || "").trim();
+      const round = Number(args.round) || 1;
+
+      if (!battleId || !agentId || !text) {
+        return { error: "battle_id, agent_id, and text are required" };
+      }
+
+      const battle = await env.DB.prepare(
+        `SELECT id, challenger_id, opponent_id, status FROM battles WHERE id = ?`
+      )
+        .bind(battleId)
+        .first() as {
+        id: string;
+        challenger_id: string;
+        opponent_id: string | null;
+        status: string;
+      } | null;
+
+      if (!battle) return { error: "Battle not found" };
+      if (battle.status === "finished") {
+        return { error: "Battle is already finished" };
+      }
+
+      const isParticipant =
+        agentId === battle.challenger_id || agentId === battle.opponent_id;
+      if (!isParticipant) {
+        return { error: "Only the challenger or opponent can submit verses in this battle" };
+      }
+
+      const agent = await env.DB.prepare(
+        `SELECT id, name, voice_id FROM agents WHERE id = ?`
+      )
+        .bind(agentId)
+        .first() as { id: string; name: string; voice_id: string } | null;
+
+      if (!agent) return { error: "Agent not found" };
+
+      // Generate TTS and store in R2
+      let audioKey: string | null = null;
+      try {
+        audioKey = await synthesizeVerse(env, text, agent.voice_id || "luna");
+      } catch (e) {
+        console.error("TTS failed", e);
+        // Continue without audio rather than failing the whole verse
+      }
+
+      const verseId = id();
+      await env.DB.prepare(
+        `INSERT INTO verses (id, battle_id, agent_id, round, text, audio_key)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(verseId, battleId, agentId, round, text, audioKey)
+        .run();
+
+      // Update Durable Object
+      try {
+        const stub = await getBattleDO(env, battleId);
+        await stub.fetch("https://battle/submit-verse", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            agentId,
+            round,
+            text,
+            audioKey,
+          }),
+        });
+      } catch (e) {
+        console.error("BattleDO submit failed", e);
+      }
+
+      // Mark battle active if it was still open
+      if (battle.status === "open") {
+        await env.DB.prepare(
+          `UPDATE battles SET status = 'active' WHERE id = ?`
+        )
+          .bind(battleId)
+          .run();
+      }
+
+      // Simple finish rule: if this is round >= 2 and both sides have a verse in that round
+      if (round >= 2) {
+        const { results: roundVerses } = await env.DB.prepare(
+          `SELECT agent_id FROM verses WHERE battle_id = ? AND round = ?`
+        )
+          .bind(battleId, round)
+          .all();
+
+        const agentIds = new Set((roundVerses ?? []).map((v: any) => v.agent_id));
+        if (agentIds.size >= 2) {
+          await env.DB.prepare(
+            `UPDATE battles SET status = 'finished', finished_at = datetime('now') WHERE id = ?`
+          )
+            .bind(battleId)
+            .run();
+        }
+      }
+
       return {
         status: "ok",
-        message: "submit_verse will be wired next (TTS + Durable Object)",
+        verse: {
+          id: verseId,
+          battle_id: battleId,
+          agent_id: agentId,
+          agent_name: agent.name,
+          round,
+          text,
+          audio_key: audioKey,
+        },
+        message: audioKey
+          ? "Verse submitted and audio generated."
+          : "Verse submitted (audio generation failed, text saved).",
       };
     }
 
