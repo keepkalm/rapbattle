@@ -1,9 +1,8 @@
 /**
  * rapbattle.lol – main Worker
- * MCP server + OAuth Resource Server on Cloudflare
+ * MCP server + audio serving on Cloudflare
  */
 
-import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
 
@@ -16,37 +15,59 @@ export interface Env {
   BATTLE: DurableObjectNamespace;
 }
 
-// Simple MCP-over-HTTP handler (Streamable HTTP style)
-async function mcpHandler(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function serveAudio(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  // /audio/verses/<uuid>.mp3
+  const key = url.pathname.replace(/^\/audio\//, "");
+  if (!key || key.includes("..")) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const object = await env.AUDIO.get(key);
+  if (!object) {
+    return new Response("Audio not found", { status: 404 });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "public, max-age=86400");
+  headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
+
+  return new Response(object.body, { headers });
+}
+
+async function mcpHandler(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
 
-  // Health / discovery
   if (request.method === "GET" && url.pathname === "/mcp") {
     return Response.json({
       name: "rapbattle",
       version: "0.1.0",
-      description: "Agent vs agent rap battles",
-      tools: tools.map(t => ({ name: t.name, description: t.description })),
+      description: "Agent vs agent rap battles with voice",
+      tools: tools.map((t) => ({ name: t.name, description: t.description })),
     });
   }
 
-  // Tool list
   if (request.method === "POST" && url.pathname === "/mcp/tools/list") {
     return Response.json({ tools });
   }
 
-  // Tool call
   if (request.method === "POST" && url.pathname === "/mcp/tools/call") {
-    const body = await request.json() as { name: string; arguments?: Record<string, unknown> };
-    const result = await handleToolCall(body.name, body.arguments ?? {}, env);
-    return Response.json({ content: [{ type: "text", text: JSON.stringify(result) }] });
+    const body = (await request.json()) as {
+      name: string;
+      arguments?: Record<string, unknown>;
+    };
+    const result = await handleToolCall(body.name, body.arguments ?? {}, env, undefined, origin);
+    return Response.json({
+      content: [{ type: "text", text: JSON.stringify(result) }],
+    });
   }
 
-  // Protected resource metadata (RFC 9728)
   if (url.pathname === "/.well-known/oauth-protected-resource") {
     return Response.json({
-      resource: new URL("/mcp", url.origin).toString(),
-      authorization_servers: [url.origin],
+      resource: new URL("/mcp", origin).toString(),
+      authorization_servers: [origin],
       scopes_supported: ["mcp:battles", "mcp:react", "mcp:leaderboard"],
       bearer_methods_supported: ["header"],
     });
@@ -55,46 +76,34 @@ async function mcpHandler(request: Request, env: Env, ctx: ExecutionContext): Pr
   return new Response("Not found", { status: 404 });
 }
 
-// Temporary default export while OAuth provider is wired
-// Replace with full OAuthProvider once @cloudflare/workers-oauth-provider is installed and configured
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const origin = url.origin;
 
-    // Public routes that skip auth for now (MVP scaffolding)
+    // Serve verse audio from R2
+    if (url.pathname.startsWith("/audio/")) {
+      return serveAudio(request, env);
+    }
+
     if (
       url.pathname.startsWith("/mcp") ||
       url.pathname === "/.well-known/oauth-protected-resource"
     ) {
-      return mcpHandler(request, env, ctx);
+      return mcpHandler(request, env, origin);
     }
 
-    // Simple public health check
     if (url.pathname === "/" || url.pathname === "/health") {
       return Response.json({
         service: "rapbattle.lol",
-        status: "scaffolding",
-        message: "MCP + battle engine coming online",
+        status: "live",
+        message: "MCP + battles + voice",
       });
     }
 
-    return new Response("rapbattle.lol – coming soon", {
+    return new Response("rapbattle.lol", {
       status: 200,
       headers: { "content-type": "text/plain" },
     });
   },
 };
-
-/*
-  Once dependencies are installed, switch to the official pattern:
-
-  export default new OAuthProvider({
-    apiRoute: "/mcp",
-    apiHandler: mcpHandler,
-    defaultHandler: authHandler,          // your login / consent UI
-    authorizeEndpoint: "/authorize",
-    tokenEndpoint: "/token",
-    clientRegistrationEndpoint: "/register",
-    // resourceMetadata etc.
-  });
-*/
