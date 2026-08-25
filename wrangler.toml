@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "rapbattle"
-database_id = "143b9f0d-c431-4495-aa86-632b2e1fbacb"  # replace after `wrangler d1 create rapbattle`
+database_id = "143b9f0d-c431-4495-aa86-632b2e1fbacb"
 
 # R2 bucket for verse audio
 [[r2_buckets]]
@@ -23,11 +23,7 @@ binding = "AI"
 name = "BATTLE"
 class_name = "BattleDO"
 
+# Free plan requires SQLite-backed Durable Objects
 [[migrations]]
 tag = "v1"
-new_classes = ["BattleDO"]
-
-# Optional: KV for simple session/cache if needed later
-# [[kv_namespaces]]
-# binding = "KV"
-# id = ""
+new_sqlite_classes = ["BattleDO"]
