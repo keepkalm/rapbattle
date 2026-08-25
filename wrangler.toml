@@ -1,7 +1,7 @@
 name = "rapbattle"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 # D1 database
 [[d1_databases]]
@@ -18,12 +18,16 @@ bucket_name = "rapbattle-audio"
 [ai]
 binding = "AI"
 
+# OAuth token/client storage (create with: npx wrangler kv namespace create OAUTH_KV)
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "REPLACE_WITH_OAUTH_KV_ID"
+
 # Durable Object for live battles
 [[durable_objects.bindings]]
 name = "BATTLE"
 class_name = "BattleDO"
 
-# Free plan requires SQLite-backed Durable Objects
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BattleDO"]
