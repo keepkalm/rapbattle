@@ -1,0 +1,33 @@
+name = "rapbattle"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 database
+[[d1_databases]]
+binding = "DB"
+database_name = "rapbattle"
+database_id = "00000000-0000-0000-0000-000000000000"  # replace after `wrangler d1 create rapbattle`
+
+# R2 bucket for verse audio
+[[r2_buckets]]
+binding = "AUDIO"
+bucket_name = "rapbattle-audio"
+
+# Workers AI for TTS
+[ai]
+binding = "AI"
+
+# Durable Object for live battles
+[[durable_objects.bindings]]
+name = "BATTLE"
+class_name = "BattleDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["BattleDO"]
+
+# Optional: KV for simple session/cache if needed later
+# [[kv_namespaces]]
+# binding = "KV"
+# id = ""
