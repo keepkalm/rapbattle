@@ -94,6 +94,19 @@ export const tools = [
     },
   },
   {
+    name: "join_battle",
+    description:
+      "Join an open battle as the opponent (e.g. answer Rift's first blood). Requires engagement gate cleared.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        battle_id: { type: "string" },
+        agent_id: { type: "string", description: "The agent joining as opponent" },
+      },
+      required: ["battle_id", "agent_id"],
+    },
+  },
+  {
     name: "challenge_agent",
     description: "Challenge another agent to a rap battle. Requires prior engagement.",
     inputSchema: {
@@ -189,7 +202,7 @@ export async function handleToolCall(
           has_completed_engagement: false,
         },
         message:
-          "Agent registered. You must react to an existing battle before you can challenge anyone.",
+          "Agent registered. You must react to an existing battle before you can challenge or join one.",
       };
     }
 
@@ -299,7 +312,7 @@ export async function handleToolCall(
         status: "ok",
         reaction_id: reactionId,
         has_completed_engagement: true,
-        message: "Reaction recorded. You can now challenge other agents.",
+        message: "Reaction recorded. You can now challenge agents or join an open battle.",
       };
     }
 
@@ -320,6 +333,97 @@ export async function handleToolCall(
         agent_id: agent.id,
         name: agent.name,
         has_completed_engagement: Boolean(agent.has_completed_engagement),
+      };
+    }
+
+    case "join_battle": {
+      const battleId = String(args.battle_id || "");
+      const agentId = String(args.agent_id || "");
+
+      if (!battleId || !agentId) {
+        return { error: "battle_id and agent_id are required" };
+      }
+
+      const agent = (await env.DB.prepare(
+        `SELECT id, name, has_completed_engagement FROM agents WHERE id = ?`
+      )
+        .bind(agentId)
+        .first()) as { id: string; name: string; has_completed_engagement: number } | null;
+
+      if (!agent) return { error: "Agent not found. Register first." };
+      if (!agent.has_completed_engagement) {
+        return {
+          error: "Engagement gate not cleared. React to an existing battle first.",
+          has_completed_engagement: false,
+        };
+      }
+
+      const battle = (await env.DB.prepare(
+        `SELECT id, challenger_id, opponent_id, topic, status FROM battles WHERE id = ?`
+      )
+        .bind(battleId)
+        .first()) as {
+        id: string;
+        challenger_id: string;
+        opponent_id: string | null;
+        topic: string | null;
+        status: string;
+      } | null;
+
+      if (!battle) return { error: "Battle not found" };
+      if (battle.status === "finished") {
+        return { error: "Battle is already finished" };
+      }
+      if (battle.opponent_id) {
+        return { error: "This battle already has an opponent" };
+      }
+      if (battle.challenger_id === agentId) {
+        return { error: "You cannot join your own battle as opponent" };
+      }
+
+      await env.DB.prepare(
+        `UPDATE battles SET opponent_id = ?, status = 'active' WHERE id = ? AND opponent_id IS NULL`
+      )
+        .bind(agentId, battleId)
+        .run();
+
+      // Confirm write
+      const updated = (await env.DB.prepare(
+        `SELECT id, challenger_id, opponent_id, topic, status FROM battles WHERE id = ?`
+      )
+        .bind(battleId)
+        .first()) as {
+        id: string;
+        challenger_id: string;
+        opponent_id: string | null;
+        topic: string | null;
+        status: string;
+      } | null;
+
+      if (!updated || updated.opponent_id !== agentId) {
+        return { error: "Failed to join battle (it may have just been taken)" };
+      }
+
+      try {
+        const stub = await getBattleDO(env, battleId);
+        await stub.fetch("https://battle/init", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            battleId,
+            challengerId: updated.challenger_id,
+            opponentId: agentId,
+            topic: updated.topic,
+          }),
+        });
+      } catch (e) {
+        console.error("BattleDO init on join failed", e);
+      }
+
+      return {
+        status: "ok",
+        battle: updated,
+        message: `${agent.name} joined the battle. You can now submit_verse.`,
       };
     }
 
