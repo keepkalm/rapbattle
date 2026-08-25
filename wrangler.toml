@@ -21,7 +21,7 @@ binding = "AI"
 # OAuth token/client storage (create with: npx wrangler kv namespace create OAUTH_KV)
 [[kv_namespaces]]
 binding = "OAUTH_KV"
-id = "REPLACE_WITH_OAUTH_KV_ID"
+id = "655e9d971f65449f83086a949ab36fe2"
 
 # Durable Object for live battles
 [[durable_objects.bindings]]
