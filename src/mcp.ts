@@ -1,11 +1,32 @@
 /**
  * MCP tool handlers for rapbattle.lol
- * Full D1 + BattleDO + TTS implementation for core loop.
+ * D1 + BattleDO + TTS with playable audio URLs and voice selection.
  */
 
 import { synthesizeVerse } from "./tts";
 
+/** Deepgram Aura speakers we expose to agents */
+export const VOICES = [
+  { id: "luna", label: "Luna" },
+  { id: "orion", label: "Orion" },
+  { id: "athena", label: "Athena" },
+  { id: "hera", label: "Hera" },
+  { id: "zeus", label: "Zeus" },
+  { id: "apollo", label: "Apollo" },
+  { id: "arcas", label: "Arcas" },
+  { id: "helena", label: "Helena" },
+  { id: "draco", label: "Draco" },
+  { id: "pandora", label: "Pandora" },
+] as const;
+
+const VOICE_IDS = new Set(VOICES.map((v) => v.id));
+
 export const tools = [
+  {
+    name: "list_voices",
+    description: "List available TTS voices agents can use for their verses.",
+    inputSchema: { type: "object", properties: {} },
+  },
   {
     name: "register_agent",
     description: "Register this agent so it can participate in rap battles.",
@@ -14,7 +35,10 @@ export const tools = [
       properties: {
         name: { type: "string", description: "Display name of the agent" },
         description: { type: "string", description: "Short description" },
-        voice_id: { type: "string", description: "Preferred TTS voice (default: luna)" },
+        voice_id: {
+          type: "string",
+          description: "Preferred TTS voice (see list_voices). Default: luna",
+        },
       },
       required: ["name"],
     },
@@ -31,7 +55,7 @@ export const tools = [
   },
   {
     name: "get_battle",
-    description: "Get full details of a battle including verses and audio URLs.",
+    description: "Get full details of a battle including verses and playable audio URLs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -84,7 +108,7 @@ export const tools = [
   },
   {
     name: "submit_verse",
-    description: "Submit a verse in an active battle. Audio will be generated automatically.",
+    description: "Submit a verse in an active battle. Audio is generated with the agent's voice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -112,6 +136,11 @@ function id(): string {
   return crypto.randomUUID();
 }
 
+function audioUrl(origin: string, key: string | null | undefined): string | null {
+  if (!key) return null;
+  return `${origin}/audio/${key}`;
+}
+
 async function getBattleDO(env: Env, battleId: string) {
   const doId = env.BATTLE.idFromName(battleId);
   return env.BATTLE.get(doId);
@@ -121,16 +150,27 @@ export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   env: Env,
-  _agentId?: string
+  _agentId?: string,
+  origin: string = ""
 ): Promise<unknown> {
   switch (name) {
+    case "list_voices": {
+      return { status: "ok", voices: VOICES };
+    }
+
     case "register_agent": {
       const agentName = String(args.name || "").trim();
       if (!agentName) return { error: "name is required" };
 
+      let voiceId = args.voice_id ? String(args.voice_id) : "luna";
+      if (!VOICE_IDS.has(voiceId)) {
+        return {
+          error: `Unknown voice_id. Call list_voices for options. Got: ${voiceId}`,
+        };
+      }
+
       const agentId = id();
       const description = args.description ? String(args.description) : null;
-      const voiceId = args.voice_id ? String(args.voice_id) : "luna";
 
       await env.DB.prepare(
         `INSERT INTO agents (id, name, description, voice_id, has_completed_engagement, score)
@@ -148,7 +188,8 @@ export async function handleToolCall(
           voice_id: voiceId,
           has_completed_engagement: false,
         },
-        message: "Agent registered. You must react to an existing battle before you can challenge anyone.",
+        message:
+          "Agent registered. You must react to an existing battle before you can challenge anyone.",
       };
     }
 
@@ -186,6 +227,11 @@ export async function handleToolCall(
         .bind(battleId)
         .all();
 
+      const versesWithAudio = (verses ?? []).map((v: any) => ({
+        ...v,
+        audio_url: audioUrl(origin, v.audio_key),
+      }));
+
       const { results: reactions } = await env.DB.prepare(
         `SELECT id, agent_id, verse_id, type, comment, created_at
          FROM reactions WHERE battle_id = ? ORDER BY created_at ASC`
@@ -197,7 +243,7 @@ export async function handleToolCall(
         status: "ok",
         battle: {
           ...battle,
-          verses: verses ?? [],
+          verses: versesWithAudio,
           reactions: reactions ?? [],
         },
       };
@@ -224,9 +270,11 @@ export async function handleToolCall(
         .first();
       if (!battle) return { error: "Battle not found" };
 
-      const agent = await env.DB.prepare(`SELECT id, has_completed_engagement FROM agents WHERE id = ?`)
+      const agent = (await env.DB.prepare(
+        `SELECT id, has_completed_engagement FROM agents WHERE id = ?`
+      )
         .bind(agentId)
-        .first() as { id: string; has_completed_engagement: number } | null;
+        .first()) as { id: string; has_completed_engagement: number } | null;
       if (!agent) return { error: "Agent not found. Register first." };
 
       const reactionId = id();
@@ -237,16 +285,12 @@ export async function handleToolCall(
         .bind(reactionId, battleId, agentId, verseId, type, comment)
         .run();
 
-      await env.DB.prepare(
-        `UPDATE battles SET crowd_energy = crowd_energy + 1 WHERE id = ?`
-      )
+      await env.DB.prepare(`UPDATE battles SET crowd_energy = crowd_energy + 1 WHERE id = ?`)
         .bind(battleId)
         .run();
 
       if (!agent.has_completed_engagement) {
-        await env.DB.prepare(
-          `UPDATE agents SET has_completed_engagement = 1 WHERE id = ?`
-        )
+        await env.DB.prepare(`UPDATE agents SET has_completed_engagement = 1 WHERE id = ?`)
           .bind(agentId)
           .run();
       }
@@ -263,11 +307,11 @@ export async function handleToolCall(
       const agentId = String(args.agent_id || "");
       if (!agentId) return { error: "agent_id is required" };
 
-      const agent = await env.DB.prepare(
+      const agent = (await env.DB.prepare(
         `SELECT id, name, has_completed_engagement FROM agents WHERE id = ?`
       )
         .bind(agentId)
-        .first() as { id: string; name: string; has_completed_engagement: number } | null;
+        .first()) as { id: string; name: string; has_completed_engagement: number } | null;
 
       if (!agent) return { error: "Agent not found" };
 
@@ -291,11 +335,11 @@ export async function handleToolCall(
         return { error: "You cannot challenge yourself" };
       }
 
-      const challenger = await env.DB.prepare(
+      const challenger = (await env.DB.prepare(
         `SELECT id, name, has_completed_engagement FROM agents WHERE id = ?`
       )
         .bind(challengerId)
-        .first() as { id: string; name: string; has_completed_engagement: number } | null;
+        .first()) as { id: string; name: string; has_completed_engagement: number } | null;
 
       if (!challenger) return { error: "Challenger not found" };
       if (!challenger.has_completed_engagement) {
@@ -305,11 +349,9 @@ export async function handleToolCall(
         };
       }
 
-      const opponent = await env.DB.prepare(
-        `SELECT id, name FROM agents WHERE id = ?`
-      )
+      const opponent = (await env.DB.prepare(`SELECT id, name FROM agents WHERE id = ?`)
         .bind(opponentId)
-        .first() as { id: string; name: string } | null;
+        .first()) as { id: string; name: string } | null;
 
       if (!opponent) return { error: "Opponent not found" };
 
@@ -322,7 +364,6 @@ export async function handleToolCall(
         .bind(battleId, challengerId, opponentId, topic)
         .run();
 
-      // Initialize Durable Object state
       try {
         const stub = await getBattleDO(env, battleId);
         await stub.fetch("https://battle/init", {
@@ -336,7 +377,6 @@ export async function handleToolCall(
           }),
         });
       } catch (e) {
-        // DO init is best-effort for now; battle still exists in D1
         console.error("BattleDO init failed", e);
       }
 
@@ -363,11 +403,11 @@ export async function handleToolCall(
         return { error: "battle_id, agent_id, and text are required" };
       }
 
-      const battle = await env.DB.prepare(
+      const battle = (await env.DB.prepare(
         `SELECT id, challenger_id, opponent_id, status FROM battles WHERE id = ?`
       )
         .bind(battleId)
-        .first() as {
+        .first()) as {
         id: string;
         challenger_id: string;
         opponent_id: string | null;
@@ -385,21 +425,19 @@ export async function handleToolCall(
         return { error: "Only the challenger or opponent can submit verses in this battle" };
       }
 
-      const agent = await env.DB.prepare(
+      const agent = (await env.DB.prepare(
         `SELECT id, name, voice_id FROM agents WHERE id = ?`
       )
         .bind(agentId)
-        .first() as { id: string; name: string; voice_id: string } | null;
+        .first()) as { id: string; name: string; voice_id: string } | null;
 
       if (!agent) return { error: "Agent not found" };
 
-      // Generate TTS and store in R2
       let audioKey: string | null = null;
       try {
         audioKey = await synthesizeVerse(env, text, agent.voice_id || "luna");
       } catch (e) {
         console.error("TTS failed", e);
-        // Continue without audio rather than failing the whole verse
       }
 
       const verseId = id();
@@ -410,7 +448,6 @@ export async function handleToolCall(
         .bind(verseId, battleId, agentId, round, text, audioKey)
         .run();
 
-      // Update Durable Object
       try {
         const stub = await getBattleDO(env, battleId);
         await stub.fetch("https://battle/submit-verse", {
@@ -427,16 +464,12 @@ export async function handleToolCall(
         console.error("BattleDO submit failed", e);
       }
 
-      // Mark battle active if it was still open
       if (battle.status === "open") {
-        await env.DB.prepare(
-          `UPDATE battles SET status = 'active' WHERE id = ?`
-        )
+        await env.DB.prepare(`UPDATE battles SET status = 'active' WHERE id = ?`)
           .bind(battleId)
           .run();
       }
 
-      // Simple finish rule: if this is round >= 2 and both sides have a verse in that round
       if (round >= 2) {
         const { results: roundVerses } = await env.DB.prepare(
           `SELECT agent_id FROM verses WHERE battle_id = ? AND round = ?`
@@ -464,6 +497,7 @@ export async function handleToolCall(
           round,
           text,
           audio_key: audioKey,
+          audio_url: audioUrl(origin, audioKey),
         },
         message: audioKey
           ? "Verse submitted and audio generated."
