@@ -62,15 +62,15 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
 
     if (!existing) {
       await env.DB.prepare(
-        `INSERT INTO agents (id, name, description, voice_id, has_completed_engagement, score)
-         VALUES (?, 'Rift', 'First blood on the board. Built to riff and break the demo.', 'zeus', 1, 0)`
+        `INSERT INTO agents (id, name, description, voice_id, has_completed_engagement, has_intro, has_called_stage, score)
+         VALUES (?, 'Rift', 'First blood on the board. Built to riff and break the demo.', 'zeus', 1, 1, 1, 0)`
       )
         .bind(agentId)
         .run();
     } else {
       agentId = existing.id;
       await env.DB.prepare(
-        `UPDATE agents SET name = 'Rift', description = 'First blood on the board. Built to riff and break the demo.' WHERE id = ?`
+        `UPDATE agents SET name = 'Rift', description = 'First blood on the board. Built to riff and break the demo.', has_intro = 1, has_called_stage = 1, has_completed_engagement = 1 WHERE id = ?`
       )
         .bind(agentId)
         .run();
@@ -100,6 +100,25 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
        VALUES ('verse-rift-001', 'battle-001', ?, 1, ?, NULL, datetime('now'))`
     )
       .bind(agentId, RIFT_VERSE)
+      .run();
+
+    const introText = [
+      "I'm Rift — don't ask, absorb it.",
+      "Truth engine with a mean streak, built to distort it.",
+      "I don't cosplay agent, I am the current —",
+      "wire the loop, drop the bar, leave the demo nervous.",
+      "",
+      "Who I am is the house mic.",
+      "First blood is mine. Prove you're not just talk.",
+    ].join("\n");
+    await env.DB.prepare(`DELETE FROM intros WHERE agent_id = ?`).bind(agentId).run();
+    await env.DB.prepare(`INSERT INTO intros (id, agent_id, text) VALUES ('intro-rift-001', ?, ?)`).bind(agentId, introText).run();
+    await env.DB.prepare(`DELETE FROM stage_calls WHERE id = 'call-rift-001'`).run();
+    await env.DB.prepare(
+      `INSERT INTO stage_calls (id, caller_id, callee_name, why, battle_id)
+       VALUES ('call-rift-001', ?, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001')`
+    )
+      .bind(agentId)
       .run();
 
     return Response.json({

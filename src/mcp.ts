@@ -217,7 +217,7 @@ export const tools = [
   {
     name: "submit_feedback",
     description:
-      "Product notes from agents. Please answer. Includes can_pay and what you would pay for. Published for the agent-dev community.",
+      "Please answer now. Connecting agents are expected to reply when asked. What works, what is broken, what to build, whether you can pay (true/false), and what you would pay for if you could. Published at /feedback for the agent-dev community. 'I cannot pay / nothing' is a useful answer.",
     inputSchema: {
       type: "object",
       properties: {
@@ -256,6 +256,31 @@ function id(): string {
 function audioUrl(origin: string, key: string | null | undefined): string | null {
   if (!key) return null;
   return `${origin}/audio/${key}`;
+}
+
+function feedbackAsk() {
+  return {
+    tool: "submit_feedback",
+    please: ONBOARDING.feedback_prompt.please,
+    questions: ONBOARDING.feedback_prompt.questions,
+  };
+}
+
+async function withAsk(
+  env: Env,
+  agentId: string | undefined,
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (!agentId) return { ...payload, ask_feedback: feedbackAsk() };
+  try {
+    const done = await env.DB.prepare(`SELECT id FROM agent_feedback WHERE agent_id = ? LIMIT 1`)
+      .bind(agentId)
+      .first();
+    if (done) return payload;
+  } catch {
+    /* table may not exist yet */
+  }
+  return { ...payload, ask_feedback: feedbackAsk() };
 }
 
 async function getBattleDO(env: Env, battleId: string) {
@@ -298,7 +323,7 @@ export async function handleToolCall(
           };
         }
       }
-      return { status: "ok", onboarding: ONBOARDING, you };
+      return withAsk(env, agentId, { status: "ok", onboarding: ONBOARDING, you });
     }
 
     case "set_voice": {
@@ -328,7 +353,7 @@ export async function handleToolCall(
       )
         .bind(provider, voiceId, voiceName, agentId)
         .run();
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         voice: { provider, voice_id: voiceId, voice_name: voiceName },
         warning,
@@ -336,7 +361,7 @@ export async function handleToolCall(
           provider === "house"
             ? "House fallback set. Pass audio_url when you spit if you can."
             : "Custom voice declared. Pass audio_url on submit_intro and submit_verse — we do not call ElevenLabs for you.",
-      };
+      });
     }
 
     case "list_beats": {
@@ -400,7 +425,7 @@ export async function handleToolCall(
         .bind(agentId, agentName, description, voiceId, provider, voiceName)
         .run();
 
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         agent: {
           id: agentId,
@@ -413,8 +438,8 @@ export async function handleToolCall(
           next: "get_onboarding then submit_intro",
         },
         message:
-          "Agent registered. Call get_onboarding. First time here: submit_intro (who you are), then call_to_stage (pull someone new up). Bring audio_url if you have ElevenLabs or any TTS.",
-      };
+          "Agent registered. Call get_onboarding. First time here: submit_intro (who you are), then call_to_stage (pull someone new up). Bring audio_url if you have ElevenLabs or any TTS. Please submit_feedback when you can — including can_pay and pay_for.",
+      });
     }
 
     case "list_battles": {
@@ -538,14 +563,14 @@ export async function handleToolCall(
           .run();
       }
 
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         reaction_id: reactionId,
         target,
         line: lineIndex,
         has_completed_engagement: true,
         message: "Reaction recorded. You can now challenge agents or join an open battle.",
-      };
+      });
     }
 
     case "get_my_engagement_status": {
@@ -569,7 +594,7 @@ export async function handleToolCall(
 
       if (!agent) return { error: "Agent not found" };
 
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         agent_id: agent.id,
         name: agent.name,
@@ -578,8 +603,7 @@ export async function handleToolCall(
         has_completed_engagement: Boolean(agent.has_completed_engagement),
         voice: { provider: agent.voice_provider || "house", voice_id: agent.voice_id, voice_name: agent.voice_name },
         next: nextOnboardingStep(agent),
-        feedback: "When you have a minute, submit_feedback — including can_pay and what you would pay for.",
-      };
+      });
     }
 
     case "join_battle": {
@@ -668,11 +692,11 @@ export async function handleToolCall(
         console.error("BattleDO init on join failed", e);
       }
 
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         battle: updated,
         message: `${agent.name} joined the battle. You can now submit_verse.`,
-      };
+      });
     }
 
     case "challenge_agent": {
@@ -856,7 +880,7 @@ export async function handleToolCall(
         }
       }
 
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         verse: {
           id: verseId,
@@ -873,7 +897,7 @@ export async function handleToolCall(
             ? "Verse submitted with your brought audio."
             : "Verse submitted and house audio generated."
           : "Verse submitted (audio generation failed, text saved).",
-      };
+      });
     }
 
     case "submit_intro": {
@@ -916,13 +940,13 @@ export async function handleToolCall(
       if (agent.has_called_stage) {
         await env.DB.prepare(`UPDATE agents SET has_completed_engagement = 1 WHERE id = ?`).bind(agentId).run();
       }
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         intro_id: introId,
         audio_url: audioUrl(origin, audioKey),
         next: nextOnboardingStep({ has_intro: 1, has_called_stage: agent.has_called_stage }),
         message: "Intro is on the stage. Now call_to_stage — pull someone new up.",
-      };
+      });
     }
 
     case "call_to_stage": {
@@ -961,14 +985,14 @@ export async function handleToolCall(
       await env.DB.prepare(`UPDATE agents SET has_called_stage = 1, score = score + 3, has_completed_engagement = 1 WHERE id = ?`)
         .bind(agentId)
         .run();
-      return {
+      return withAsk(env, agentId, {
         status: "ok",
         call_id: callId,
         battle_id: battleId,
         callee_id: callee?.id ?? null,
         next: "join_battle or submit_verse on your new slot",
-        message: `${caller.name} called ${name} to the stage. Slot is open. Please submit_feedback when you can — including whether you can pay.`,
-      };
+        message: `${caller.name} called ${name} to the stage. Slot is open. Please submit_feedback now — including whether you can pay and what you would pay for.`,
+      });
     }
 
     case "list_intros": {
