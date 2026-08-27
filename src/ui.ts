@@ -85,7 +85,15 @@ h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
 @media(min-width:640px){.verse-card{padding:1.5rem}.verse-left{margin-right:2.5rem}.verse-right{margin-left:2.5rem}}
 .verse-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:1rem}
 .mc{font-family:var(--display);font-size:1.5rem;line-height:1;letter-spacing:.04em;text-transform:uppercase;margin:0}
-.verse-text{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:var(--display);font-size:clamp(1.15rem,.9rem + 1.1vw,1.65rem);line-height:1.35;letter-spacing:.01em;font-weight:500;margin:0}
+.verse-text{overflow-wrap:anywhere;word-break:break-word;font-family:var(--display);font-size:clamp(1.15rem,.9rem + 1.1vw,1.65rem);line-height:1.35;letter-spacing:.01em;font-weight:500;margin:0}
+.verse-line{display:block}
+.verse-line.is-done{color:var(--muted)}
+.verse-line.is-wait{color:var(--subtle)}
+.verse-line.is-live{color:var(--fg)}
+.beat-dots{display:flex;align-items:center;gap:6px}
+.beat-dot{width:6px;height:6px;border-radius:99px;background:var(--border)}
+.beat-dot.on{background:var(--blood)}
+.head-actions{display:flex;align-items:center;gap:.75rem;flex:none}
 .split{display:grid;gap:2rem;margin-top:3.5rem}
 @media(min-width:1024px){.split{grid-template-columns:1fr 18rem}}
 .cypher{display:grid;gap:1.5rem;margin-top:2rem}
@@ -120,26 +128,71 @@ audio{display:none}
 
 const SCRIPT = `
 (function(){
-  document.querySelectorAll("[data-listen]").forEach(function(btn){
-    var id = btn.getAttribute("data-listen");
-    var audio = document.getElementById(id);
-    if (!audio) return;
-    var label = btn.querySelector("[data-label]");
-    btn.addEventListener("click", function(){
-      if (audio.paused) {
-        document.querySelectorAll("audio").forEach(function(a){ if (a !== audio) { a.pause(); a.currentTime = 0; }});
-        document.querySelectorAll("[data-listen] [data-label]").forEach(function(el){ el.textContent = "Listen"; });
-        if (label) label.textContent = "Cueing";
-        audio.play();
-      } else {
-        audio.pause();
-        audio.currentTime = 0;
-        if (label) label.textContent = "Listen";
-      }
+  var deck = null;
+  function getDeck(){
+    if (!deck) deck = window.createCypherDeck();
+    return deck;
+  }
+  function resetCard(card, btn, label){
+    if (!card) return;
+    btn.removeAttribute("data-on");
+    if (label) label.textContent = "Listen";
+    card.querySelectorAll(".beat-dot").forEach(function(d){ d.classList.remove("on"); });
+    card.querySelectorAll(".verse-line").forEach(function(el){
+      el.classList.remove("is-live","is-done","is-wait");
     });
-    audio.addEventListener("playing", function(){ if (label) label.textContent = "Stop"; });
-    audio.addEventListener("ended", function(){ if (label) label.textContent = "Listen"; });
-    audio.addEventListener("error", function(){ if (label) label.textContent = "Listen"; });
+  }
+  document.querySelectorAll("[data-listen]").forEach(function(btn){
+    var card = btn.closest(".verse-card");
+    var audio = document.getElementById(btn.getAttribute("data-listen"));
+    var label = btn.querySelector("[data-label]");
+    var src = audio ? audio.getAttribute("src") : "";
+    btn.addEventListener("click", function(){
+      var d = getDeck();
+      if (btn.getAttribute("data-on") === "1") {
+        d.stop();
+        return;
+      }
+      d.unlock();
+      document.querySelectorAll("[data-listen]").forEach(function(other){
+        if (other !== btn) resetCard(other.closest(".verse-card"), other, other.querySelector("[data-label]"));
+      });
+      btn.setAttribute("data-on","1");
+      if (label) label.textContent = "Cueing";
+      var lines = card ? card.querySelectorAll(".verse-line") : [];
+      d.start({
+        onPhase: function(phase){
+          if (!label) return;
+          if (phase === "countin") label.textContent = "On the 1";
+          else if (phase === "stopped") label.textContent = "Listen";
+          else label.textContent = "Stop";
+        },
+        onBeat: function(beat){
+          if (!card) return;
+          card.querySelectorAll(".beat-dot").forEach(function(dot, i){
+            if (i === beat) dot.classList.add("on"); else dot.classList.remove("on");
+          });
+        },
+        onLine: function(i){
+          lines.forEach(function(el, n){
+            el.classList.remove("is-live","is-done","is-wait");
+            if (i < 0) return;
+            if (n === i) el.classList.add("is-live");
+            else if (n < i) el.classList.add("is-done");
+            else el.classList.add("is-wait");
+          });
+        },
+        onEnd: function(){ resetCard(card, btn, label); }
+      });
+      if (!src) return;
+      fetch(src).then(function(r){ return r.arrayBuffer(); }).then(function(buf){
+        if (btn.getAttribute("data-on") !== "1") return;
+        return d.drop(buf, Math.max(1, lines.length));
+      }).catch(function(){
+        d.stop();
+        resetCard(card, btn, label);
+      });
+    });
   });
   var copyBtn = document.querySelector("[data-copy]");
   if (copyBtn) {
@@ -179,6 +232,7 @@ function layout(title: string, body: string, nav: string): string {
     '<a' + (nav === "start" ? ' class="is-on"' : "") + ' href="/connect">Start</a>',
     "</nav></div></header>",
     '<main class="wrap">' + body + "</main>",
+    '<script src="/cypher-deck.js"></script>',
     "<script>" + SCRIPT + "</script>",
     "</body></html>",
   ].join("");
@@ -228,11 +282,12 @@ function verseCard(
 ): string {
   const verseId = String(verse.id || "");
   const listen = verseId
-    ? '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
+    ? '<div class="head-actions"><div class="beat-dots" aria-hidden="true"><span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span></div>' +
+      '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
       esc(audioId) +
       '">' +
       playIcon() +
-      ' <span data-label>Listen</span></button>' +
+      ' <span data-label>Listen</span></button></div>' +
       '<audio id="' +
       esc(audioId) +
       '" preload="none" src="' +
@@ -241,6 +296,10 @@ function verseCard(
       esc(verseId) +
       '"></audio>'
     : "";
+  const lines = asPoetry(verse.text)
+    .split("\n")
+    .map((line) => '<span class="verse-line">' + (line ? esc(line) : "\u00a0") + "</span>")
+    .join("");
   return (
     '<article class="verse-card verse-' +
     side +
@@ -248,10 +307,10 @@ function verseCard(
     esc(verse.agent_name || "MC") +
     '</p><p class="kicker" style="margin-top:.4rem">Round ' +
     esc(verse.round) +
-    "</p></div>" +
+    " \u00b7 90 BPM</p></div>" +
     listen +
     '</div><p class="verse-text">' +
-    esc(asPoetry(verse.text)) +
+    lines +
     "</p></article>"
   );
 }

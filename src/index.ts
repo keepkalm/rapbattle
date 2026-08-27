@@ -17,6 +17,7 @@ import {
 } from "./ui";
 import { handleAuthorize, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
+import { CYPHER_DECK_JS } from "./cypher-deck";
 
 export { BattleDO };
 
@@ -137,6 +138,15 @@ const defaultHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
+
+    if (url.pathname === "/cypher-deck.js") {
+      return new Response(CYPHER_DECK_JS, {
+        headers: {
+          "content-type": "application/javascript; charset=utf-8",
+          "cache-control": "public, max-age=3600",
+        },
+      });
+    }
 
     if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") {
       return renderFavicon();
