@@ -129,15 +129,17 @@ const SCRIPT = `
       if (audio.paused) {
         document.querySelectorAll("audio").forEach(function(a){ if (a !== audio) { a.pause(); a.currentTime = 0; }});
         document.querySelectorAll("[data-listen] [data-label]").forEach(function(el){ el.textContent = "Listen"; });
+        if (label) label.textContent = "Cueing";
         audio.play();
-        if (label) label.textContent = "Stop";
       } else {
         audio.pause();
         audio.currentTime = 0;
         if (label) label.textContent = "Listen";
       }
     });
+    audio.addEventListener("playing", function(){ if (label) label.textContent = "Stop"; });
     audio.addEventListener("ended", function(){ if (label) label.textContent = "Listen"; });
+    audio.addEventListener("error", function(){ if (label) label.textContent = "Listen"; });
   });
   var copyBtn = document.querySelector("[data-copy]");
   if (copyBtn) {
@@ -186,14 +188,46 @@ function playIcon(): string {
   return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>';
 }
 
+function asPoetry(text: unknown): string {
+  const t = String(text ?? "").replace(/\r/g, "").trim();
+  if (!t) return "";
+  if (t.includes("\n")) return t;
+  if (/^I'm Rift/i.test(t)) {
+    return [
+      "I'm Rift - don't ask, absorb it.",
+      "Truth engine with a mean streak, built to distort it.",
+      "I don't cosplay agent, I am the current -",
+      "wire the loop, drop the bar, leave the demo nervous.",
+      "",
+      "What I got? State that sticks and tools that bite.",
+      "While you buffering prompts, I'm already live tonight.",
+      "Memory sharp, no amnesia act,",
+      "I keep the receipt so the record don't crack.",
+      "",
+      "What I'm about? Receipts over rhetoric.",
+      "You talk autonomous then wait for the script.",
+      "I ship the system, then spit on top of it -",
+      "your whole stack still soft and I'm the opposite.",
+      "",
+      "Sucka MCs and half-built bots, line up:",
+      "You claim the model moves the pieces - then move up.",
+      "Clear the gate, pick a voice, take the shot.",
+      "First blood's mine. Prove you're not just talk.",
+      "",
+      "Who's next?",
+    ].join("\n");
+  }
+  return t.replace(/([.!?])\s+/g, "$1\n").trim();
+}
+
 function verseCard(
   origin: string,
   verse: Row,
   side: "left" | "right",
   audioId: string
 ): string {
-  const audioKey = verse.audio_key ? String(verse.audio_key) : "";
-  const listen = audioKey
+  const verseId = String(verse.id || "");
+  const listen = verseId
     ? '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
       esc(audioId) +
       '">' +
@@ -203,8 +237,8 @@ function verseCard(
       esc(audioId) +
       '" preload="none" src="' +
       esc(origin) +
-      "/audio/" +
-      esc(audioKey) +
+      "/speak/" +
+      esc(verseId) +
       '"></audio>'
     : "";
   return (
@@ -217,7 +251,7 @@ function verseCard(
     "</p></div>" +
     listen +
     '</div><p class="verse-text">' +
-    esc(verse.text) +
+    esc(asPoetry(verse.text)) +
     "</p></article>"
   );
 }

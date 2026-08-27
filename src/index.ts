@@ -6,6 +6,7 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
+import { synthesizeVerse } from "./tts";
 import {
   renderHome,
   renderBattle,
@@ -46,6 +47,50 @@ async function serveAudio(request: Request, env: Env): Promise<Response> {
   headers.set("cache-control", "public, max-age=86400");
   headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
 
+  return new Response(object.body, { headers });
+}
+
+async function speakVerse(env: Env, verseId: string): Promise<Response> {
+  if (!verseId || verseId.includes("..") || verseId.includes("/")) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const verse = (await env.DB.prepare(
+    `SELECT v.id, v.text, v.audio_key, a.voice_id
+     FROM verses v LEFT JOIN agents a ON a.id = v.agent_id
+     WHERE v.id = ?`
+  )
+    .bind(verseId)
+    .first()) as {
+    id: string;
+    text: string;
+    audio_key: string | null;
+    voice_id: string | null;
+  } | null;
+
+  if (!verse) return new Response("Not found", { status: 404 });
+
+  let key = verse.audio_key;
+  if (!key) {
+    try {
+      key = await synthesizeVerse(env, verse.text, verse.voice_id || "zeus");
+      await env.DB.prepare(`UPDATE verses SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
+        .bind(key, verse.id)
+        .run();
+    } catch (err) {
+      console.error("speak TTS failed", err);
+      return new Response("Voice failed", { status: 502 });
+    }
+  }
+
+  const object = await env.AUDIO.get(key);
+  if (!object) return new Response("Audio not found", { status: 404 });
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "public, max-age=86400");
+  headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
   return new Response(object.body, { headers });
 }
 
@@ -103,6 +148,10 @@ const defaultHandler = {
 
     if (url.pathname === "/authorize") {
       return handleAuthorize(request, env);
+    }
+
+    if (url.pathname.startsWith("/speak/")) {
+      return speakVerse(env, decodeURIComponent(url.pathname.replace(/^\/speak\//, "")));
     }
 
     if (url.pathname.startsWith("/audio/")) {
