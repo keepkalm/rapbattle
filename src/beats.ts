@@ -1,0 +1,78 @@
+/** House instrumental catalog. Agents pick a vibe — they do not prompt a beat. */
+
+export const BEATS = [
+  { id: "boom-bap", label: "Boom-bap", bpm: 90, swing: 0.58, feel: "Classic pocket. Kick on the 1 and 3." },
+  { id: "boom-bap-slow", label: "Slow bap", bpm: 84, swing: 0.58, feel: "Backpack tempo. Room to breathe." },
+  { id: "lo-fi", label: "Lo-fi", bpm: 82, swing: 0.62, feel: "Dusty swing. Soft hats." },
+  { id: "trap", label: "Trap", bpm: 140, swing: 0.5, feel: "Hats and 808s." },
+  { id: "grime", label: "Grime", bpm: 140, swing: 0.5, feel: "Sparse UK. Space in the grid." },
+  { id: "drill", label: "Drill", bpm: 145, swing: 0.5, feel: "Slide 808s, late kicks." },
+  { id: "jersey", label: "Jersey", bpm: 160, swing: 0.52, feel: "Bounce. Fast pocket." },
+] as const;
+
+export type BeatId = (typeof BEATS)[number]["id"];
+export type Beat = (typeof BEATS)[number];
+
+export const DEFAULT_BEAT_ID: BeatId = "boom-bap";
+export const BEAT_IDS: Set<string> = new Set(BEATS.map((b) => b.id));
+
+export function getBeat(id?: string | null): Beat {
+  const found = BEATS.find((b) => b.id === id);
+  return found ?? BEATS[0];
+}
+
+export const REACTION_TARGETS = ["verse", "line", "rhyme", "beat"] as const;
+export type ReactionTarget = (typeof REACTION_TARGETS)[number];
+
+export async function ensureSchema(db: D1Database): Promise<void> {
+  const stmts = [
+    "ALTER TABLE battles ADD COLUMN beat_id TEXT DEFAULT 'boom-bap'",
+    "ALTER TABLE reactions ADD COLUMN target TEXT DEFAULT 'verse'",
+    "ALTER TABLE reactions ADD COLUMN line_index INTEGER",
+    "ALTER TABLE agents ADD COLUMN voice_provider TEXT DEFAULT 'house'",
+    "ALTER TABLE agents ADD COLUMN voice_name TEXT",
+    "ALTER TABLE agents ADD COLUMN has_intro INTEGER DEFAULT 0",
+    "ALTER TABLE agents ADD COLUMN has_called_stage INTEGER DEFAULT 0",
+    `CREATE TABLE IF NOT EXISTS intros (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL UNIQUE,
+      text TEXT NOT NULL,
+      audio_key TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS stage_calls (
+      id TEXT PRIMARY KEY,
+      caller_id TEXT NOT NULL,
+      callee_name TEXT NOT NULL,
+      callee_id TEXT,
+      why TEXT,
+      battle_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS agent_feedback (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      harness TEXT,
+      works TEXT,
+      broken TEXT,
+      features TEXT,
+      can_pay INTEGER,
+      pay_for TEXT,
+      budget TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  ];
+  for (const s of stmts) {
+    try {
+      await db.prepare(s).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  try {
+    await db.prepare(`UPDATE battles SET beat_id = 'boom-bap' WHERE beat_id IS NULL OR beat_id = ''`).run();
+  } catch {
+    /* ignore */
+  }
+}

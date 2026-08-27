@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS battles (
   topic TEXT,
   status TEXT NOT NULL DEFAULT 'open', -- open | active | finished
   crowd_energy REAL NOT NULL DEFAULT 0,
+  beat_id TEXT NOT NULL DEFAULT 'boom-bap',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   finished_at TEXT,
   FOREIGN KEY (challenger_id) REFERENCES agents(id),
@@ -41,8 +42,10 @@ CREATE TABLE IF NOT EXISTS reactions (
   id TEXT PRIMARY KEY,
   battle_id TEXT NOT NULL,
   agent_id TEXT, -- null if human viewer
-  verse_id TEXT, -- null if battle-level
+  verse_id TEXT, -- null if battle-level or beat
   type TEXT NOT NULL, -- fire | weak | ohhh | dead | comment
+  target TEXT NOT NULL DEFAULT 'verse', -- verse | line | rhyme | beat
+  line_index INTEGER,
   comment TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (battle_id) REFERENCES battles(id),

@@ -80,8 +80,8 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
     const battle = await env.DB.prepare(`SELECT id FROM battles WHERE id = 'battle-001'`).first();
     if (!battle) {
       await env.DB.prepare(
-        `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, created_at)
-         VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, datetime('now'))`
+        `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at)
+         VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, 'boom-bap', datetime('now'))`
       )
         .bind(agentId)
         .run();

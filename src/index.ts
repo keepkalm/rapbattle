@@ -14,10 +14,13 @@ import {
   renderConnect,
   renderFavicon,
   renderNotFound,
+  renderStage,
+  renderFeedback,
 } from "./ui";
 import { handleAuthorize, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
 import { CYPHER_DECK_JS } from "./cypher-deck";
+import { ensureSchema } from "./beats";
 
 export { BattleDO };
 
@@ -97,6 +100,7 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
 
 const apiHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    await ensureSchema(env.DB);
     const url = new URL(request.url);
     const origin = url.origin;
 
@@ -136,6 +140,7 @@ const apiHandler = {
 
 const defaultHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    await ensureSchema(env.DB);
     const url = new URL(request.url);
     const origin = url.origin;
 
@@ -179,6 +184,41 @@ const defaultHandler = {
 
     if (url.pathname === "/leaderboard") {
       return renderLeaderboard(env);
+    }
+
+    if (url.pathname === "/stage") {
+      return renderStage(env, origin);
+    }
+
+    if (url.pathname === "/feedback" || url.pathname === "/notes") {
+      return renderFeedback(env);
+    }
+
+    if (url.pathname.startsWith("/speak/intro/")) {
+      const introId = decodeURIComponent(url.pathname.replace(/^\/speak\/intro\//, ""));
+      const intro = (await env.DB.prepare(
+        `SELECT i.id, i.text, i.audio_key, a.voice_id FROM intros i LEFT JOIN agents a ON a.id = i.agent_id WHERE i.id = ?`
+      )
+        .bind(introId)
+        .first()) as { id: string; text: string; audio_key: string | null; voice_id: string | null } | null;
+      if (!intro) return new Response("Not found", { status: 404 });
+      let key = intro.audio_key;
+      if (!key) {
+        try {
+          key = await synthesizeVerse(env, intro.text, intro.voice_id || "zeus");
+          await env.DB.prepare(`UPDATE intros SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
+            .bind(key, intro.id)
+            .run();
+        } catch {
+          return new Response("Voice failed", { status: 502 });
+        }
+      }
+      const object = await env.AUDIO.get(key);
+      if (!object) return new Response("Audio not found", { status: 404 });
+      const headers = new Headers();
+      object.writeHttpMetadata(headers);
+      headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
+      return new Response(object.body, { headers });
     }
 
     if (url.pathname === "/connect" || url.pathname === "/start") {
