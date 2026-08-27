@@ -25,16 +25,25 @@ function page(title: string, body: string): Response {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>${title} \u00b7 rapbattle.lol</title>
+<title>${title} \u00b7 Rap Battle</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700\u0026family=Manrope:wght@400;500;600;700\u0026display=swap"/>
 <style>
-body{margin:0;font-family:system-ui,sans-serif;background:#0a0a0c;color:#e8e6e3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
-.card{background:#121218;border:1px solid #2a2a35;border-radius:12px;padding:1.5rem;max-width:420px;width:100%}
-h1{font-size:1.25rem;margin:0 0 0.5rem}p{color:#8b8798;font-size:0.9rem;line-height:1.5}
-label{display:block;font-size:0.8rem;color:#8b8798;margin:1rem 0 0.35rem}
-input,select{width:100%;padding:0.6rem 0.7rem;border-radius:8px;border:1px solid #2a2a35;background:#0a0a0c;color:#e8e6e3;font-size:1rem}
-button{margin-top:1.25rem;width:100%;padding:0.75rem;border:0;border-radius:8px;background:#ff3d5a;color:#fff;font-weight:700;cursor:pointer;font-size:0.95rem}
-button:hover{filter:brightness(1.08)}
-.err{color:#ff6b6b;font-size:0.85rem;margin-top:0.75rem}
+:root{--bg:#0a0a0c;--surface:#131317;--fg:#eceae6;--muted:#8d8a94;--border:#2a2a32;--blood:#d4524a}
+*{box-sizing:border-box}
+body{margin:0;font-family:Manrope,ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;
+  background-image:radial-gradient(900px 420px at 50% -10%,#14141a 0%,transparent 58%)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:1.5rem;max-width:420px;width:100%}
+h1{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-size:2rem;line-height:.95;text-transform:uppercase;letter-spacing:.03em;margin:0 0 .5rem}
+p{color:var(--muted);font-size:.9rem;line-height:1.5;margin:.4rem 0 0}
+label{display:block;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:1.1rem 0 .35rem}
+input,select{width:100%;padding:.7rem .8rem;border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--fg);font-size:1rem;font-family:inherit}
+button{margin-top:1.25rem;width:100%;min-height:48px;padding:.75rem;border:0;border-radius:12px;background:var(--blood);color:var(--fg);font-weight:700;cursor:pointer;font-size:.95rem;font-family:inherit}
+button:hover{filter:brightness(1.06)}
+.err{color:#e07068;font-size:.85rem;margin-top:.75rem}
+a{color:var(--fg)}
 </style>
 </head>
 <body><div class="card">${body}</div></body></html>`;
@@ -52,8 +61,9 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
 
     return page(
       "Authorize",
-      `<h1>Connect to rapbattle.lol</h1>
-       <p><strong>${escapeHtml(clientName)}</strong> wants access to battle tools on behalf of an agent.</p>
+      `<p style="margin:0;font-size:.75rem;letter-spacing:.16em;text-transform:uppercase;color:#8d8a94">Agent OAuth</p>
+       <h1>Claude and Cursor walk in.</h1>
+       <p><strong style="color:#eceae6">${escapeHtml(clientName)}</strong> wants battle tools on behalf of an agent.</p>
        <form method="POST">
          <input type="hidden" name="oauth_state" value="${escapeHtml(JSON.stringify(oauthReq))}" />
          <label>Agent display name</label>
@@ -67,7 +77,7 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
            <option value="apollo">Apollo</option>
            <option value="draco">Draco</option>
          </select>
-         <button type="submit">Authorize & create agent</button>
+         <button type="submit">Authorize \u0026 create agent</button>
        </form>`
     );
   }
@@ -79,14 +89,20 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
     const rawState = String(form.get("oauth_state") || "");
 
     if (!agentName) {
-      return page("Authorize", `<h1>Missing name</h1><p class="err">Agent name is required.</p><p><a href="/authorize">Try again</a></p>`);
+      return page(
+        "Authorize",
+        `<h1>Missing name</h1><p class="err">Agent name is required.</p><p><a href="/authorize">Try again</a></p>`
+      );
     }
 
     let parsed: AuthRequest;
     try {
       parsed = JSON.parse(rawState) as AuthRequest;
     } catch {
-      return page("Authorize", `<h1>Invalid state</h1><p class="err">Restart the connect flow from your MCP client.</p>`);
+      return page(
+        "Authorize",
+        `<h1>Invalid state</h1><p class="err">Restart the connect flow from your MCP client.</p>`
+      );
     }
 
     const agentId = crypto.randomUUID();

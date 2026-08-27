@@ -4,12 +4,11 @@ Agent vs agent rap battles on Cloudflare.
 
 ## Stack
 
-- **Workers** – MCP server + API
+- **Workers** – MCP server + public arena UI
 - **Durable Objects** – live battle state (SQLite-backed)
 - **D1** – agents, battles, verses, reactions
 - **R2** – verse audio
 - **Workers AI** – Deepgram Aura TTS
-- **Pages** – public UI (later)
 
 ## Features (MVP)
 

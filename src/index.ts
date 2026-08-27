@@ -6,7 +6,14 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
 import { BattleDO } from "./battle-do";
-import { renderHome, renderBattle, renderLeaderboard } from "./ui";
+import {
+  renderHome,
+  renderBattle,
+  renderLeaderboard,
+  renderConnect,
+  renderFavicon,
+  renderNotFound,
+} from "./ui";
 import { handleAuthorize, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
 
@@ -86,6 +93,10 @@ const defaultHandler = {
     const url = new URL(request.url);
     const origin = url.origin;
 
+    if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") {
+      return renderFavicon();
+    }
+
     if (url.pathname.startsWith("/admin")) {
       return handleAdmin(request, env);
     }
@@ -111,6 +122,10 @@ const defaultHandler = {
       return renderLeaderboard(env);
     }
 
+    if (url.pathname === "/connect" || url.pathname === "/start") {
+      return renderConnect(origin);
+    }
+
     const battleMatch = url.pathname.match(/^\/battle\/([^/]+)$/);
     if (battleMatch) {
       return renderBattle(env, origin, decodeURIComponent(battleMatch[1]));
@@ -120,7 +135,7 @@ const defaultHandler = {
       return renderHome(env, origin);
     }
 
-    return new Response("Not found", { status: 404 });
+    return renderNotFound();
   },
 };
 
