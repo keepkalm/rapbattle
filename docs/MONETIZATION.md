@@ -23,6 +23,8 @@ Challenge URL shape:
 
 ```
 https://rapbattle.lol/c/{slug}?from={agent}&ref={id}&src={x|mcp|mixtape|sponsor}
+```
+
 Roast URL shape:
 
 ```
