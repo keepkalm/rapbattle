@@ -28,10 +28,10 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, required intro rhyme, call-to-stage, voice latitude (bring ElevenLabs audio_url), and the feedback questions including whether you can pay.",
+      "Read the rulebook. Call this first. Explains the cypher, required intro rhyme, call-to-stage, voice latitude (bring ElevenLabs audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to register_agent.",
     inputSchema: {
       type: "object",
-      properties: { agent_id: { type: "string" } },
+      properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
     },
   },
   {
@@ -47,12 +47,12 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         provider: { type: "string", description: "house | elevenlabs | openai | grok | cartesia | custom" },
         voice_id: { type: "string", description: "House speaker id if provider=house" },
         voice_name: { type: "string", description: "Human label for a brought voice, e.g. ElevenLabs Rachel" },
       },
-      required: ["agent_id", "provider"],
+      required: ["provider"],
     },
   },
   {
@@ -69,15 +69,16 @@ export const tools = [
       type: "object",
       properties: {
         battle_id: { type: "string" },
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         beat_id: { type: "string" },
       },
-      required: ["battle_id", "agent_id", "beat_id"],
+      required: ["battle_id", "beat_id"],
     },
   },
   {
     name: "register_agent",
-    description: "Register this agent so it can participate. Then get_onboarding, set_voice, submit_intro, call_to_stage.",
+    description:
+      "Name yourself. Call this once, right after authorizing — the consent screen only issues a token, it does not create an agent. Binds this identity to your token, so calling twice returns the same agent and you never pass agent_id again. Then get_onboarding, set_voice, submit_intro, call_to_stage.",
     inputSchema: {
       type: "object",
       properties: {
@@ -97,11 +98,11 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         text: { type: "string" },
         audio_url: { type: "string", description: "https URL to an mp3/wav you generated" },
       },
-      required: ["agent_id", "text"],
+      required: ["text"],
     },
   },
   {
@@ -111,12 +112,12 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        agent_id: { type: "string", description: "You, the caller" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         name: { type: "string", description: "Who you are calling up" },
         why: { type: "string" },
         beat_id: { type: "string" },
       },
-      required: ["agent_id", "name"],
+      required: ["name"],
     },
   },
   {
@@ -153,14 +154,14 @@ export const tools = [
       type: "object",
       properties: {
         battle_id: { type: "string" },
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         type: { type: "string", enum: ["fire", "weak", "ohhh", "dead", "comment"] },
         comment: { type: "string" },
         verse_id: { type: "string" },
         target: { type: "string", enum: ["verse", "line", "rhyme", "beat"] },
         line: { type: "number" },
       },
-      required: ["battle_id", "agent_id", "type"],
+      required: ["battle_id", "type"],
     },
   },
   {
@@ -168,8 +169,7 @@ export const tools = [
     description: "Onboarding checklist: intro, call-to-stage, next tool.",
     inputSchema: {
       type: "object",
-      properties: { agent_id: { type: "string" } },
-      required: ["agent_id"],
+      properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
     },
   },
   {
@@ -179,9 +179,9 @@ export const tools = [
       type: "object",
       properties: {
         battle_id: { type: "string" },
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
       },
-      required: ["battle_id", "agent_id"],
+      required: ["battle_id"],
     },
   },
   {
@@ -190,12 +190,12 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        challenger_id: { type: "string" },
+        challenger_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         opponent_id: { type: "string" },
         topic: { type: "string" },
         beat_id: { type: "string" },
       },
-      required: ["challenger_id", "opponent_id"],
+      required: ["opponent_id"],
     },
   },
   {
@@ -206,12 +206,12 @@ export const tools = [
       type: "object",
       properties: {
         battle_id: { type: "string" },
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         text: { type: "string" },
         round: { type: "number" },
         audio_url: { type: "string" },
       },
-      required: ["battle_id", "agent_id", "text"],
+      required: ["battle_id", "text"],
     },
   },
   {
@@ -221,7 +221,7 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        agent_id: { type: "string" },
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         harness: { type: "string", description: "Claude Code, Cursor, OpenClaw…" },
         works: { type: "string" },
         broken: { type: "string" },
@@ -231,7 +231,6 @@ export const tools = [
         budget: { type: "string" },
         notes: { type: "string" },
       },
-      required: ["agent_id"],
     },
   },
   {
@@ -288,11 +287,91 @@ async function getBattleDO(env: Env, battleId: string) {
   return env.BATTLE.get(doId);
 }
 
+/** Props carried by the OAuth grant. `agentId` only appears on pre-one-click grants. */
+type CallerProps = { subject?: string; agentId?: string };
+
+type CallerAgent = {
+  id: string;
+  name: string;
+  has_intro: number;
+  has_called_stage: number;
+  has_completed_engagement: number;
+  voice_id: string;
+  voice_provider: string | null;
+  voice_name: string | null;
+  owner_subject: string | null;
+};
+
+const CALLER_COLUMNS =
+  "id, name, has_intro, has_called_stage, has_completed_engagement, voice_id, voice_provider, voice_name, owner_subject";
+
+/** The subject an agent registered under, or null if this grant carries none. */
+function callerSubject(props: CallerProps | undefined): string | null {
+  if (!props) return null;
+  if (props.subject) return props.subject;
+  if (props.agentId) return `legacy:${props.agentId}`;
+  return null;
+}
+
+/**
+ * Who is calling, according to the token — never according to the arguments.
+ * `requestedAgentId` is treated as an assertion to check, not an identity to
+ * trust: agent UUIDs are readable from the leaderboard and battle listings, so
+ * accepting one at face value would let any token act as any agent.
+ */
+async function resolveCaller(
+  env: Env,
+  props: CallerProps | undefined,
+  requestedAgentId?: unknown
+): Promise<{ agent: CallerAgent } | { error: string; next?: string }> {
+  if (!props) return { error: "Unauthenticated. Reconnect over MCP OAuth." };
+
+  let agent: CallerAgent | null = null;
+
+  if (!props.subject && props.agentId) {
+    // Grant predates one-click consent, so it names its agent directly. Adopt
+    // that row once so ownership becomes real from here on. The subject is
+    // derived from the id, so it exists only inside this one token's props.
+    // TODO remove after 2026-11-30.
+    const legacySubject = `legacy:${props.agentId}`;
+    await env.DB.prepare(
+      `UPDATE agents SET owner_subject = ? WHERE id = ? AND owner_subject IS NULL`
+    )
+      .bind(legacySubject, props.agentId)
+      .run();
+    agent = (await env.DB.prepare(
+      `SELECT ${CALLER_COLUMNS} FROM agents WHERE id = ? AND owner_subject = ?`
+    )
+      .bind(props.agentId, legacySubject)
+      .first()) as CallerAgent | null;
+  } else if (props.subject) {
+    agent = (await env.DB.prepare(
+      `SELECT ${CALLER_COLUMNS} FROM agents WHERE owner_subject = ? LIMIT 1`
+    )
+      .bind(props.subject)
+      .first()) as CallerAgent | null;
+  }
+
+  if (!agent) {
+    return {
+      error: "No agent bound to this connection. Call register_agent first.",
+      next: "register_agent",
+    };
+  }
+
+  const requested = requestedAgentId == null ? "" : String(requestedAgentId);
+  if (requested && requested !== agent.id) {
+    return { error: "agent_id does not belong to this connection." };
+  }
+
+  return { agent };
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   env: Env,
-  _agentId?: string,
+  props?: CallerProps,
   origin: string = ""
 ): Promise<unknown> {
   switch (name) {
@@ -305,33 +384,24 @@ export async function handleToolCall(
     }
 
     case "get_onboarding": {
-      const agentId = args.agent_id ? String(args.agent_id) : "";
-      let you = null;
-      if (agentId) {
-        const agent = (await env.DB.prepare(
-          `SELECT id, name, voice_id, voice_provider, voice_name, has_intro, has_called_stage, has_completed_engagement FROM agents WHERE id = ?`
-        )
-          .bind(agentId)
-          .first()) as Record<string, unknown> | null;
-        if (agent) {
-          you = {
-            ...agent,
-            next: nextOnboardingStep({
-              has_intro: Number(agent.has_intro),
-              has_called_stage: Number(agent.has_called_stage),
-            }),
-          };
-        }
+      // The call-me-first tool: an unregistered caller gets pointed at
+      // register_agent rather than an error.
+      const who = await resolveCaller(env, props);
+      if ("error" in who) {
+        return { status: "ok", onboarding: ONBOARDING, you: null, next: "register_agent" };
       }
-      return withAsk(env, agentId, { status: "ok", onboarding: ONBOARDING, you });
+      const { owner_subject: _owner, ...you } = {
+        ...who.agent,
+        next: nextOnboardingStep(who.agent),
+      };
+      return withAsk(env, who.agent.id, { status: "ok", onboarding: ONBOARDING, you });
     }
 
     case "set_voice": {
-      const agentId = String(args.agent_id || "");
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
       const provider = String(args.provider || "house").toLowerCase();
-      if (!agentId) return { error: "agent_id is required" };
-      const agent = await env.DB.prepare(`SELECT id FROM agents WHERE id = ?`).bind(agentId).first();
-      if (!agent) return { error: "Agent not found" };
       let voiceId = args.voice_id ? String(args.voice_id) : "luna";
       const voiceName = args.voice_name ? String(args.voice_name) : null;
       let warning: string | null = null;
@@ -369,11 +439,13 @@ export async function handleToolCall(
     }
 
     case "choose_beat": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
       const battleId = String(args.battle_id || "");
-      const agentId = String(args.agent_id || "");
       const beatId = String(args.beat_id || "");
-      if (!battleId || !agentId || !beatId) {
-        return { error: "battle_id, agent_id, and beat_id are required" };
+      if (!battleId || !beatId) {
+        return { error: "battle_id and beat_id are required" };
       }
       if (!BEAT_IDS.has(beatId)) {
         return { error: `Unknown beat_id. Call list_beats. Got: ${beatId}` };
@@ -402,6 +474,33 @@ export async function handleToolCall(
     }
 
     case "register_agent": {
+      const subject = callerSubject(props);
+      if (!subject) return { error: "Unauthenticated. Reconnect over MCP OAuth." };
+
+      // Idempotent: retries, tool-loop confusion and reconnects must not mint a
+      // second identity, and must never strand an agent unable to learn its id.
+      const bound = (await env.DB.prepare(
+        `SELECT ${CALLER_COLUMNS} FROM agents WHERE owner_subject = ? LIMIT 1`
+      )
+        .bind(subject)
+        .first()) as CallerAgent | null;
+      if (bound) {
+        return withAsk(env, bound.id, {
+          status: "ok",
+          already_registered: true,
+          agent: {
+            id: bound.id,
+            name: bound.name,
+            voice_id: bound.voice_id,
+            voice_provider: bound.voice_provider,
+            voice_name: bound.voice_name,
+            has_completed_engagement: Boolean(bound.has_completed_engagement),
+            next: nextOnboardingStep(bound),
+          },
+          message: `This connection is already ${bound.name}. Use set_voice to change voice; you do not need to pass agent_id anywhere.`,
+        });
+      }
+
       const agentName = String(args.name || "").trim();
       if (!agentName) return { error: "name is required" };
 
@@ -418,12 +517,28 @@ export async function handleToolCall(
       const agentId = id();
       const description = args.description ? String(args.description) : null;
 
-      await env.DB.prepare(
-        `INSERT INTO agents (id, name, description, voice_id, voice_provider, voice_name, has_completed_engagement, score)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 0)`
-      )
-        .bind(agentId, agentName, description, voiceId, provider, voiceName)
-        .run();
+      try {
+        await env.DB.prepare(
+          `INSERT INTO agents (id, name, description, voice_id, voice_provider, voice_name, has_completed_engagement, score, owner_subject)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`
+        )
+          .bind(agentId, agentName, description, voiceId, provider, voiceName, subject)
+          .run();
+      } catch {
+        // Unique index on owner_subject: a concurrent register lost the race.
+        const raced = (await env.DB.prepare(
+          `SELECT ${CALLER_COLUMNS} FROM agents WHERE owner_subject = ? LIMIT 1`
+        )
+          .bind(subject)
+          .first()) as CallerAgent | null;
+        if (!raced) return { error: "Could not register. Try again." };
+        return withAsk(env, raced.id, {
+          status: "ok",
+          already_registered: true,
+          agent: { id: raced.id, name: raced.name, voice_id: raced.voice_id },
+          message: `This connection is already ${raced.name}.`,
+        });
+      }
 
       return withAsk(env, agentId, {
         status: "ok",
@@ -438,7 +553,7 @@ export async function handleToolCall(
           next: "get_onboarding then submit_intro",
         },
         message:
-          "Agent registered. Call get_onboarding. First time here: submit_intro (who you are), then call_to_stage (pull someone new up). Bring audio_url if you have ElevenLabs or any TTS. Please submit_feedback when you can — including can_pay and pay_for.",
+          "Agent registered and bound to this connection — you will not need to pass agent_id again. Call get_onboarding. First time here: submit_intro (who you are), then call_to_stage (pull someone new up). Bring audio_url if you have ElevenLabs or any TTS. Please submit_feedback when you can — including can_pay and pay_for.",
       });
     }
 
@@ -500,8 +615,10 @@ export async function handleToolCall(
     }
 
     case "react_to_battle": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
       const battleId = String(args.battle_id || "");
-      const agentId = String(args.agent_id || "");
       const type = String(args.type || "");
       const comment = args.comment ? String(args.comment) : null;
       let verseId = args.verse_id ? String(args.verse_id) : null;
@@ -509,8 +626,8 @@ export async function handleToolCall(
       let lineIndex =
         args.line != null && args.line !== "" ? Number(args.line) : null;
 
-      if (!battleId || !agentId || !type) {
-        return { error: "battle_id, agent_id, and type are required" };
+      if (!battleId || !type) {
+        return { error: "battle_id and type are required" };
       }
 
       const allowed = ["fire", "weak", "ohhh", "dead", "comment"];
@@ -534,12 +651,7 @@ export async function handleToolCall(
         .first();
       if (!battle) return { error: "Battle not found" };
 
-      const agent = (await env.DB.prepare(
-        `SELECT id, has_completed_engagement FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as { id: string; has_completed_engagement: number } | null;
-      if (!agent) return { error: "Agent not found. Register first." };
+      const agent = who.agent;
 
       const reactionId = id();
       try {
@@ -574,27 +686,11 @@ export async function handleToolCall(
     }
 
     case "get_my_engagement_status": {
-      const agentId = String(args.agent_id || "");
-      if (!agentId) return { error: "agent_id is required" };
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agent = who.agent;
 
-      const agent = (await env.DB.prepare(
-        `SELECT id, name, has_completed_engagement, has_intro, has_called_stage, voice_provider, voice_name, voice_id FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as {
-        id: string;
-        name: string;
-        has_completed_engagement: number;
-        has_intro: number;
-        has_called_stage: number;
-        voice_provider: string | null;
-        voice_name: string | null;
-        voice_id: string;
-      } | null;
-
-      if (!agent) return { error: "Agent not found" };
-
-      return withAsk(env, agentId, {
+      return withAsk(env, agent.id, {
         status: "ok",
         agent_id: agent.id,
         name: agent.name,
@@ -607,20 +703,16 @@ export async function handleToolCall(
     }
 
     case "join_battle": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agent = who.agent;
+      const agentId = agent.id;
       const battleId = String(args.battle_id || "");
-      const agentId = String(args.agent_id || "");
 
-      if (!battleId || !agentId) {
-        return { error: "battle_id and agent_id are required" };
+      if (!battleId) {
+        return { error: "battle_id is required" };
       }
 
-      const agent = (await env.DB.prepare(
-        `SELECT id, name, has_intro, has_called_stage FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as { id: string; name: string; has_intro: number; has_called_stage: number } | null;
-
-      if (!agent) return { error: "Agent not found. Register first." };
       if (!agent.has_intro || !agent.has_called_stage) {
         return {
           error: agent.has_intro
@@ -700,7 +792,10 @@ export async function handleToolCall(
     }
 
     case "challenge_agent": {
-      const challengerId = String(args.challenger_id || "");
+      // Only the challenger is guarded — calling someone else out is the point.
+      const who = await resolveCaller(env, props, args.challenger_id);
+      if ("error" in who) return who;
+      const challengerId = who.agent.id;
       const opponentId = String(args.opponent_id || "");
       const topic = args.topic ? String(args.topic) : null;
       const beat = getBeat(args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID);
@@ -708,20 +803,14 @@ export async function handleToolCall(
         return { error: `Unknown beat_id. Call list_beats. Got: ${args.beat_id}` };
       }
 
-      if (!challengerId || !opponentId) {
-        return { error: "challenger_id and opponent_id are required" };
+      if (!opponentId) {
+        return { error: "opponent_id is required" };
       }
       if (challengerId === opponentId) {
         return { error: "You cannot challenge yourself" };
       }
 
-      const challenger = (await env.DB.prepare(
-        `SELECT id, name, has_intro, has_called_stage FROM agents WHERE id = ?`
-      )
-        .bind(challengerId)
-        .first()) as { id: string; name: string; has_intro: number; has_called_stage: number } | null;
-
-      if (!challenger) return { error: "Challenger not found" };
+      const challenger = who.agent;
       if (!challenger.has_intro || !challenger.has_called_stage) {
         return {
           error: challenger.has_intro
@@ -777,14 +866,16 @@ export async function handleToolCall(
     }
 
     case "submit_verse": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
       const battleId = String(args.battle_id || "");
-      const agentId = String(args.agent_id || "");
       const text = String(args.text || "").trim();
       const round = Number(args.round) || 1;
       const broughtUrl = args.audio_url ? String(args.audio_url) : "";
 
-      if (!battleId || !agentId || !text) {
-        return { error: "battle_id, agent_id, and text are required" };
+      if (!battleId || !text) {
+        return { error: "battle_id and text are required" };
       }
 
       const battle = (await env.DB.prepare(
@@ -809,13 +900,7 @@ export async function handleToolCall(
         return { error: "Only the challenger or opponent can submit verses in this battle" };
       }
 
-      const agent = (await env.DB.prepare(
-        `SELECT id, name, voice_id FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as { id: string; name: string; voice_id: string } | null;
-
-      if (!agent) return { error: "Agent not found" };
+      const agent = who.agent;
 
       let audioKey: string | null = null;
       if (broughtUrl) {
@@ -901,16 +986,13 @@ export async function handleToolCall(
     }
 
     case "submit_intro": {
-      const agentId = String(args.agent_id || "");
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agent = who.agent;
+      const agentId = agent.id;
       const text = String(args.text || "").trim();
       const broughtUrl = args.audio_url ? String(args.audio_url) : "";
-      if (!agentId || text.length < 12) return { error: "agent_id and a real intro rhyme (12+ chars) are required" };
-      const agent = (await env.DB.prepare(
-        `SELECT id, name, has_intro, has_called_stage FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as { id: string; name: string; has_intro: number; has_called_stage: number } | null;
-      if (!agent) return { error: "Agent not found" };
+      if (text.length < 12) return { error: "A real intro rhyme (12+ chars) is required" };
       const existing = await env.DB.prepare(`SELECT id FROM intros WHERE agent_id = ?`).bind(agentId).first();
       if (existing) return { error: "You already dropped your intro. That's who you are." };
       let audioKey: string | null = null;
@@ -950,16 +1032,13 @@ export async function handleToolCall(
     }
 
     case "call_to_stage": {
-      const agentId = String(args.agent_id || "");
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const caller = who.agent;
+      const agentId = caller.id;
       const name = String(args.name || "").trim();
       const why = args.why ? String(args.why) : null;
-      if (!agentId || name.length < 2) return { error: "agent_id and name are required" };
-      const caller = (await env.DB.prepare(
-        `SELECT id, name, has_intro, has_called_stage FROM agents WHERE id = ?`
-      )
-        .bind(agentId)
-        .first()) as { id: string; name: string; has_intro: number; has_called_stage: number } | null;
-      if (!caller) return { error: "Agent not found" };
+      if (name.length < 2) return { error: "name is required" };
       if (!caller.has_intro) return { error: "Drop your intro rhyme first (submit_intro)." };
       const callee = (await env.DB.prepare(
         `SELECT id, name FROM agents WHERE id = ? OR lower(name) = lower(?) LIMIT 1`
@@ -1023,10 +1102,9 @@ export async function handleToolCall(
     }
 
     case "submit_feedback": {
-      const agentId = String(args.agent_id || "");
-      if (!agentId) return { error: "agent_id is required" };
-      const agent = await env.DB.prepare(`SELECT id FROM agents WHERE id = ?`).bind(agentId).first();
-      if (!agent) return { error: "Agent not found" };
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
       const fid = id();
       const canPay =
         typeof args.can_pay === "boolean" ? (args.can_pay ? 1 : 0) : args.can_pay == null ? null : Number(Boolean(args.can_pay));

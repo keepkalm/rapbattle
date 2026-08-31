@@ -33,6 +33,11 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     "ALTER TABLE agents ADD COLUMN voice_name TEXT",
     "ALTER TABLE agents ADD COLUMN has_intro INTEGER DEFAULT 0",
     "ALTER TABLE agents ADD COLUMN has_called_stage INTEGER DEFAULT 0",
+    // Binds an agent to the OAuth grant that registered it. Must precede its
+    // index: errors here are swallowed, so an index created first would fail
+    // silently and never be retried. NULL = legacy row, unclaimable.
+    "ALTER TABLE agents ADD COLUMN owner_subject TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_owner_subject ON agents(owner_subject)",
     `CREATE TABLE IF NOT EXISTS intros (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL UNIQUE,

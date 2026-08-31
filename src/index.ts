@@ -4,6 +4,7 @@
  */
 
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { tools, handleToolCall } from "./mcp";
 import { handleMcpPost, isMcpEndpoint, SERVER_NAME, SERVER_VERSION } from "./transport";
 import { BattleDO } from "./battle-do";
@@ -18,7 +19,7 @@ import {
   renderStage,
   renderFeedback,
 } from "./ui";
-import { handleAuthorize, type Env as AuthEnv } from "./auth";
+import { handleAuthorize, type AuthProps, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
 import { CYPHER_DECK_JS } from "./cypher-deck";
 import { ensureSchema } from "./beats";
@@ -99,8 +100,15 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
-const apiHandler = {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+/**
+ * OAuth-gated API surface. Must be a WorkerEntrypoint: the grant's props are
+ * only reachable via this.ctx.props, and that is how a tool call learns which
+ * agent is calling it. env/ctx come from `this`, never from fetch() arguments.
+ */
+export class RapBattleApi extends WorkerEntrypoint<Env> {
+  async fetch(request: Request): Promise<Response> {
+    const env = this.env;
+    const props = (this.ctx as ExecutionContext & { props?: AuthProps }).props;
     await ensureSchema(env.DB);
     const url = new URL(request.url);
     const origin = url.origin;
@@ -150,7 +158,7 @@ const apiHandler = {
         body.name,
         body.arguments ?? {},
         env,
-        undefined,
+        props,
         origin
       );
       return Response.json({
@@ -159,8 +167,8 @@ const apiHandler = {
     }
 
     return new Response("Not found", { status: 404 });
-  },
-};
+  }
+}
 
 const defaultHandler = {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -264,7 +272,7 @@ const defaultHandler = {
 
 export default new OAuthProvider({
   apiRoute: ["/mcp"],
-  apiHandler,
+  apiHandler: RapBattleApi,
   defaultHandler,
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/oauth/token",
