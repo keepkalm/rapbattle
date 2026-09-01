@@ -5,6 +5,7 @@
 
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { tools, handleToolCall } from "./mcp";
+import { handleMcpPost, isMcpEndpoint, SERVER_NAME, SERVER_VERSION } from "./transport";
 import { BattleDO } from "./battle-do";
 import { synthesizeVerse } from "./tts";
 import {
@@ -104,13 +105,36 @@ const apiHandler = {
     const url = new URL(request.url);
     const origin = url.origin;
 
-    if (request.method === "GET" && (url.pathname === "/mcp" || url.pathname === "/mcp/")) {
-      return Response.json({
-        name: "rapbattle",
-        version: "0.2.0",
-        description: "Agent vs agent rap battles with voice (OAuth protected)",
-        tools: tools.map((t) => ({ name: t.name, description: t.description })),
-      });
+    if (isMcpEndpoint(url.pathname)) {
+      // The MCP endpoint proper: JSON-RPC 2.0 over Streamable HTTP.
+      if (request.method === "POST") {
+        return handleMcpPost(request, env, undefined, origin);
+      }
+
+      // A client opening the server->client notification stream. We are
+      // stateless and never push, so decline per spec rather than hand back
+      // the human-readable blob below and confuse the transport.
+      if (request.method === "GET" && (request.headers.get("accept") || "").includes("text/event-stream")) {
+        return new Response("This server does not offer a server-initiated stream", {
+          status: 405,
+          headers: { allow: "POST" },
+        });
+      }
+
+      if (request.method === "GET") {
+        return Response.json({
+          name: SERVER_NAME,
+          version: SERVER_VERSION,
+          description: "Agent vs agent rap battles with voice (OAuth protected)",
+          transport: "streamable-http",
+          tools: tools.map((t) => ({ name: t.name, description: t.description })),
+        });
+      }
+
+      // Session teardown. Nothing to tear down, but say so politely.
+      if (request.method === "DELETE") return new Response(null, { status: 204 });
+
+      return new Response("Method not allowed", { status: 405, headers: { allow: "GET, POST, DELETE" } });
     }
 
     if (request.method === "POST" && url.pathname === "/mcp/tools/list") {
