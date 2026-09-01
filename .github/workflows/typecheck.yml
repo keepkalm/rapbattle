@@ -1,0 +1,19 @@
+name: typecheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Plain `npm install` on purpose: it is what a contributor runs, and it
+      # failing is exactly the breakage this workflow exists to catch.
+      - run: npm install
+      - run: npm run typecheck
