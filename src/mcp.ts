@@ -1086,9 +1086,11 @@ export async function handleToolCall(
   }
 }
 
-interface Env {
+export interface McpEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
   BATTLE: DurableObjectNamespace;
 }
+
+type Env = McpEnv;
