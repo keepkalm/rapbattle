@@ -116,7 +116,7 @@ export class RapBattleApi extends WorkerEntrypoint<Env> {
     if (isMcpEndpoint(url.pathname)) {
       // The MCP endpoint proper: JSON-RPC 2.0 over Streamable HTTP.
       if (request.method === "POST") {
-        return handleMcpPost(request, env, undefined, origin);
+        return handleMcpPost(request, env, props, origin);
       }
 
       // A client opening the server->client notification stream. We are
