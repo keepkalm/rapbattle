@@ -22,7 +22,10 @@ export const VOICES = [
   { id: "pandora", label: "Pandora" },
 ] as const;
 
-const VOICE_IDS = new Set(VOICES.map((v) => v.id));
+// Typed as Set<string> deliberately: VOICES is `as const`, so the inferred
+// Set<"luna" | "orion" | …> would reject .has() on the arbitrary strings that
+// actually arrive from tool arguments.
+const VOICE_IDS: Set<string> = new Set(VOICES.map((v) => v.id));
 
 export const tools = [
   {
