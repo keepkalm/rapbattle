@@ -13,7 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Plain `npm install` on purpose: it is what a contributor runs, and it
-      # failing is exactly the breakage this workflow exists to catch.
-      - run: npm install
+      # npm ci, not npm install: it installs exactly the committed lockfile and
+      # fails loudly if package.json and package-lock.json ever drift apart —
+      # which is the breakage this workflow exists to catch.
+      - run: npm ci
       - run: npm run typecheck
