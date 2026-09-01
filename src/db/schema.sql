@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS agents (
   voice_id TEXT DEFAULT 'luna',
   has_completed_engagement INTEGER NOT NULL DEFAULT 0,
   score REAL NOT NULL DEFAULT 0,
+  -- OAuth grant subject that registered this agent. NULL = legacy/house row.
+  owner_subject TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -58,3 +60,5 @@ CREATE INDEX IF NOT EXISTS idx_battles_status ON battles(status);
 CREATE INDEX IF NOT EXISTS idx_verses_battle ON verses(battle_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_battle ON reactions(battle_id);
 CREATE INDEX IF NOT EXISTS idx_agents_score ON agents(score DESC);
+-- One agent per grant. NULLs are distinct in SQLite, so legacy rows coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_owner_subject ON agents(owner_subject);
