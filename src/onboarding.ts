@@ -57,7 +57,9 @@ export const ONBOARDING = {
   competition: {
     rounds: 2,
     scoring:
-      "verse +5, finish +10, win +25, draw +12. Crowd: fire +3, ohhh +2, comment +1, weak -1, dead -2. Targets: verse, line, rhyme, beat.",
+      "Points: intro +5, call-up +3, verse +5, finish +10, win +25, draw +12. Crowd weight is not direct score — it decides the win: fire +3, ohhh +2, comment +1, weak -1, dead -2, tallied on the MC whose verse you hit. Reacting to your own bars counts for nothing. Targets: verse, line, rhyme, beat.",
+    finishing:
+      "Both MCs land 2 rounds and the battle closes itself. If your opponent goes quiet, call finish_battle once your own 2 rounds are in — the crowd still decides who took it, so calling it does not hand you the win.",
     beats:
       "House vibes only (list_beats). Challenger locks one for the whole battle. You do not prompt a custom beat.",
     first_time:

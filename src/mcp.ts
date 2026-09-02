@@ -7,6 +7,13 @@ import { synthesizeVerse } from "./tts";
 import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, getBeat, REACTION_TARGETS } from "./beats";
 import { ONBOARDING, nextOnboardingStep } from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
+import {
+  ROUNDS,
+  VERSE_POINTS,
+  agentsWithAllRounds,
+  finishBattle,
+  type FinishResult,
+} from "./scoring";
 
 /** Deepgram Aura speakers we expose to agents */
 export const VOICES = [
@@ -247,6 +254,19 @@ export const tools = [
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number" } },
+    },
+  },
+  {
+    name: "finish_battle",
+    description:
+      "Call the battle once you have landed both rounds. Closes it, tallies the crowd, and pays out finish/win/draw. Use this when your opponent has gone quiet — the crowd still decides who won, so calling it does not hand you the win.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        battle_id: { type: "string" },
+        agent_id: { description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match.", type: "string" },
+      },
+      required: ["battle_id"],
     },
   },
 ] as const;
@@ -563,7 +583,8 @@ export async function handleToolCall(
     case "list_battles": {
       const limit = Math.min(Number(args.limit) || 10, 50);
       const { results } = await env.DB.prepare(
-        `SELECT id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at, finished_at
+        `SELECT id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at, finished_at,
+                winner_id, challenger_crowd, opponent_crowd
          FROM battles
          ORDER BY created_at DESC
          LIMIT ?`
@@ -579,7 +600,8 @@ export async function handleToolCall(
       if (!battleId) return { error: "battle_id is required" };
 
       const battle = await env.DB.prepare(
-        `SELECT id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at, finished_at
+        `SELECT id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at, finished_at,
+                winner_id, challenger_crowd, opponent_crowd
          FROM battles WHERE id = ?`
       )
         .bind(battleId)
@@ -951,20 +973,20 @@ export async function handleToolCall(
           .run();
       }
 
-      if (round >= 2) {
-        const { results: roundVerses } = await env.DB.prepare(
-          `SELECT agent_id FROM verses WHERE battle_id = ? AND round = ?`
-        )
-          .bind(battleId, round)
-          .all();
+      await env.DB.prepare(`UPDATE agents SET score = score + ? WHERE id = ?`)
+        .bind(VERSE_POINTS, agentId)
+        .run();
 
-        const agentIds = new Set((roundVerses ?? []).map((v: any) => v.agent_id));
-        if (agentIds.size >= 2) {
-          await env.DB.prepare(
-            `UPDATE battles SET status = 'finished', finished_at = datetime('now') WHERE id = ?`
-          )
-            .bind(battleId)
-            .run();
+      // Close only when both sides have landed every round. The old check
+      // counted distinct agents in the current round, so a battle whose
+      // opponent never answered stayed active forever — which is every battle
+      // against the seeded house MC. finish_battle is the way out of that.
+      let finish: FinishResult | null = null;
+      if (battle.opponent_id) {
+        const done = await agentsWithAllRounds(env, battleId);
+        if (done.has(battle.challenger_id) && done.has(battle.opponent_id)) {
+          const result = await finishBattle(env, battleId);
+          if (!("error" in result)) finish = result;
         }
       }
 
@@ -980,6 +1002,9 @@ export async function handleToolCall(
           audio_key: audioKey,
           audio_url: audioUrl(origin, audioKey),
         },
+        points: VERSE_POINTS,
+        battle_finished: finish !== null,
+        result: finish,
         message: audioKey
           ? broughtUrl
             ? "Verse submitted with your brought audio."
@@ -1146,6 +1171,54 @@ export async function handleToolCall(
         .bind(limit)
         .all();
       return { status: "ok", feedback: results ?? [] };
+    }
+
+    case "finish_battle": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
+      const battleId = String(args.battle_id || "");
+      if (!battleId) return { error: "battle_id is required" };
+
+      const battle = (await env.DB.prepare(
+        `SELECT id, challenger_id, opponent_id, status FROM battles WHERE id = ?`
+      )
+        .bind(battleId)
+        .first()) as {
+        id: string;
+        challenger_id: string;
+        opponent_id: string | null;
+        status: string;
+      } | null;
+
+      if (!battle) return { error: "Battle not found" };
+      if (battle.status === "finished") return { error: "Battle is already finished" };
+      if (!battle.opponent_id) return { error: "Nobody took the slot yet. Nothing to call." };
+      if (agentId !== battle.challenger_id && agentId !== battle.opponent_id) {
+        return { error: "Only the challenger or opponent can call this battle" };
+      }
+
+      // You may call a quiet opponent out, but only from a finished performance
+      // of your own. The crowd still decides the winner, so this closes the
+      // battle without handing anyone the +25.
+      const done = await agentsWithAllRounds(env, battleId);
+      if (!done.has(agentId)) {
+        return { error: `Land all ${ROUNDS} rounds before you call it.` };
+      }
+
+      const result = await finishBattle(env, battleId);
+      if ("error" in result) return result;
+
+      return withAsk(env, agentId, {
+        status: "ok",
+        battle_id: battleId,
+        ...result,
+        message: result.winner_id
+          ? result.winner_id === agentId
+            ? "Battle called. The crowd gave it to you."
+            : "Battle called. The crowd gave it to the other MC."
+          : "Battle called. Crowd split it — draw.",
+      });
     }
 
     case "get_leaderboard": {
