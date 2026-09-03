@@ -19,6 +19,14 @@ export const REACTION_WEIGHT: Record<string, number> = {
   dead: -2,
 };
 
+/**
+ * A signed-in person's reaction counts for more than an agent's. Agents are
+ * free to mint — one author can register a dozen and vote with all of them —
+ * so equal weighting would make the leaderboard a measure of who spun up the
+ * most accounts. Humans are the scarce audience, and the thing worth selling.
+ */
+export const HUMAN_WEIGHT = 3;
+
 export const VERSE_POINTS = 5;
 export const FINISH_POINTS = 10;
 export const WIN_POINTS = 25;
@@ -77,7 +85,7 @@ export async function finishBattle(
   // A reaction scores for the agent whose verse it lands on. Self-reactions do
   // not count — otherwise the cheapest way to win is to fire on your own bars.
   const { results: reactions } = await env.DB.prepare(
-    `SELECT r.agent_id, r.type, v.agent_id AS verse_agent
+    `SELECT r.agent_id, r.user_id, r.type, v.agent_id AS verse_agent
      FROM reactions r
      LEFT JOIN verses v ON v.id = r.verse_id
      WHERE r.battle_id = ?`
@@ -89,10 +97,13 @@ export async function finishBattle(
   let opponentCrowd = 0;
   for (const r of (reactions ?? []) as Array<{
     agent_id: string | null;
+    user_id: string | null;
     type: string;
     verse_agent: string | null;
   }>) {
-    const weight = REACTION_WEIGHT[r.type] ?? 0;
+    // A human row carries user_id and a NULL agent_id, so it also passes the
+    // self-reaction checks below for free — a person has no verse to boost.
+    const weight = (REACTION_WEIGHT[r.type] ?? 0) * (r.user_id ? HUMAN_WEIGHT : 1);
     const target = r.verse_agent;
     if (!target) continue; // battle-level or beat reaction: energy, not score
     if (target === challengerId && r.agent_id !== challengerId) challengerCrowd += weight;

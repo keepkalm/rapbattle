@@ -1,6 +1,6 @@
 /**
  * MCP tool handlers for rapbattle.lol
- * D1 + BattleDO + TTS with playable audio URLs and voice selection.
+ * D1 + TTS with playable audio URLs and voice selection.
  */
 
 import { synthesizeVerse } from "./tts";
@@ -8,6 +8,7 @@ import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, getBeat, REACTION_TARGETS } from "./b
 import { ONBOARDING, nextOnboardingStep } from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
 import {
+  REACTION_WEIGHT,
   ROUNDS,
   VERSE_POINTS,
   agentsWithAllRounds,
@@ -303,11 +304,6 @@ async function withAsk(
     /* table may not exist yet */
   }
   return { ...payload, ask_feedback: feedbackAsk() };
-}
-
-async function getBattleDO(env: Env, battleId: string) {
-  const doId = env.BATTLE.idFromName(battleId);
-  return env.BATTLE.get(doId);
 }
 
 /** Props carried by the OAuth grant. `agentId` only appears on pre-one-click grants. */
@@ -690,8 +686,8 @@ export async function handleToolCall(
         return { error: "You already dropped that reaction on this target." };
       }
 
-      await env.DB.prepare(`UPDATE battles SET crowd_energy = crowd_energy + 1 WHERE id = ?`)
-        .bind(battleId)
+      await env.DB.prepare(`UPDATE battles SET crowd_energy = crowd_energy + ? WHERE id = ?`)
+        .bind(REACTION_WEIGHT[type] ?? 0, battleId)
         .run();
 
       if (!agent.has_completed_engagement) {
@@ -793,22 +789,6 @@ export async function handleToolCall(
         return { error: "Failed to join battle (it may have just been taken)" };
       }
 
-      try {
-        const stub = await getBattleDO(env, battleId);
-        await stub.fetch("https://battle/init", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            battleId,
-            challengerId: updated.challenger_id,
-            opponentId: agentId,
-            topic: updated.topic,
-          }),
-        });
-      } catch (e) {
-        console.error("BattleDO init on join failed", e);
-      }
-
       return withAsk(env, agentId, {
         status: "ok",
         battle: updated,
@@ -859,22 +839,6 @@ export async function handleToolCall(
       )
         .bind(battleId, challengerId, opponentId, topic, beat.id)
         .run();
-
-      try {
-        const stub = await getBattleDO(env, battleId);
-        await stub.fetch("https://battle/init", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            battleId,
-            challengerId,
-            opponentId,
-            topic,
-          }),
-        });
-      } catch (e) {
-        console.error("BattleDO init failed", e);
-      }
 
       return {
         status: "ok",
@@ -950,22 +914,6 @@ export async function handleToolCall(
       )
         .bind(verseId, battleId, agentId, round, text, audioKey)
         .run();
-
-      try {
-        const stub = await getBattleDO(env, battleId);
-        await stub.fetch("https://battle/submit-verse", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            agentId,
-            round,
-            text,
-            audioKey,
-          }),
-        });
-      } catch (e) {
-        console.error("BattleDO submit failed", e);
-      }
 
       if (battle.status === "open") {
         await env.DB.prepare(`UPDATE battles SET status = 'active' WHERE id = ?`)
@@ -1244,7 +1192,6 @@ export interface McpEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
-  BATTLE: DurableObjectNamespace;
 }
 
 type Env = McpEnv;

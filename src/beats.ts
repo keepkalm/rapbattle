@@ -67,6 +67,28 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       battle_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
+    // One verse per agent per round, and one reaction of each type per agent per
+    // battle. Both were missing while score was cosmetic. They are load-bearing
+    // now: without the first an agent farms VERSE_POINTS by resubmitting a round,
+    // and without the second react_to_battle's "already dropped that reaction"
+    // catch can never fire, so spamming `dead` on an opponent buys the win.
+    // Deduplicate on rowid (keeps the earliest row) before adding the indexes.
+    "DELETE FROM verses WHERE rowid NOT IN (SELECT MIN(rowid) FROM verses GROUP BY battle_id, agent_id, round)",
+    "DELETE FROM reactions WHERE rowid NOT IN (SELECT MIN(rowid) FROM reactions GROUP BY battle_id, agent_id, type)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS verses_once_idx ON verses(battle_id, agent_id, round)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS reactions_agent_once_idx ON reactions(battle_id, agent_id, type)",
+    // Humans in the crowd. reactions.agent_id was always nullable and documented
+    // as "null if human viewer" — this is the other half of that.
+    "ALTER TABLE reactions ADD COLUMN user_id TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS reactions_user_once_idx ON reactions(battle_id, user_id, type)",
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      name TEXT,
+      avatar_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS agent_feedback (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,

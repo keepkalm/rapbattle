@@ -7,7 +7,6 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { tools, handleToolCall } from "./mcp";
 import { handleMcpPost, isMcpEndpoint, SERVER_NAME, SERVER_VERSION } from "./transport";
-import { BattleDO } from "./battle-do";
 import { synthesizeVerse } from "./tts";
 import {
   renderHome,
@@ -18,21 +17,34 @@ import {
   renderNotFound,
   renderStage,
   renderFeedback,
+  renderLogin,
 } from "./ui";
+import {
+  getSession,
+  handleCallback,
+  isProvider,
+  logout,
+  startAuth,
+} from "./human-auth";
+import { handleHumanReaction } from "./crowd";
 import { handleAuthorize, type AuthProps, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
 import { CYPHER_DECK_JS } from "./cypher-deck";
 import { ensureSchema } from "./beats";
 
-export { BattleDO };
-
 export interface Env extends AuthEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
-  BATTLE: DurableObjectNamespace;
   OAUTH_KV: KVNamespace;
   ADMIN_SECRET?: string;
+  // Human sign-in (see src/human-auth.ts). Absent here just means that
+  // provider's button does not render; the agent-facing MCP surface is
+  // unaffected either way.
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  X_CLIENT_ID?: string;
+  X_CLIENT_SECRET?: string;
 }
 
 async function serveAudio(request: Request, env: Env): Promise<Response> {
@@ -197,6 +209,31 @@ const defaultHandler = {
       return handleAuthorize(request, env);
     }
 
+    // --- Humans -------------------------------------------------------------
+    // Note the two different OAuth roles: /authorize above is this Worker
+    // acting as an OAuth *server* for agent harnesses. The routes below are it
+    // acting as an OAuth *client* to Google and X so a person can sign in.
+    const authMatch = url.pathname.match(/^\/auth\/([^/]+)\/(start|callback)$/);
+    if (authMatch) {
+      const [, provider, step] = authMatch;
+      if (!isProvider(provider)) return renderNotFound();
+      return step === "start"
+        ? startAuth(request, env, provider, origin)
+        : handleCallback(request, env, provider, origin);
+    }
+
+    if (url.pathname === "/logout" && request.method === "POST") {
+      return logout(request, env);
+    }
+
+    if (url.pathname === "/react" && request.method === "POST") {
+      return handleHumanReaction(request, env);
+    }
+
+    if (url.pathname === "/login") {
+      return renderLogin(env, await getSession(request, env), url.searchParams.get("error"));
+    }
+
     if (url.pathname.startsWith("/speak/")) {
       return speakVerse(env, decodeURIComponent(url.pathname.replace(/^\/speak\//, "")));
     }
@@ -215,15 +252,15 @@ const defaultHandler = {
     }
 
     if (url.pathname === "/leaderboard") {
-      return renderLeaderboard(env);
+      return renderLeaderboard(env, await getSession(request, env));
     }
 
     if (url.pathname === "/stage") {
-      return renderStage(env, origin);
+      return renderStage(env, origin, await getSession(request, env));
     }
 
     if (url.pathname === "/feedback" || url.pathname === "/notes") {
-      return renderFeedback(env);
+      return renderFeedback(env, await getSession(request, env));
     }
 
     if (url.pathname.startsWith("/speak/intro/")) {
@@ -254,16 +291,22 @@ const defaultHandler = {
     }
 
     if (url.pathname === "/connect" || url.pathname === "/start") {
-      return renderConnect(origin);
+      return renderConnect(origin, await getSession(request, env));
     }
 
     const battleMatch = url.pathname.match(/^\/battle\/([^/]+)$/);
     if (battleMatch) {
-      return renderBattle(env, origin, decodeURIComponent(battleMatch[1]));
+      return renderBattle(
+        env,
+        origin,
+        decodeURIComponent(battleMatch[1]),
+        await getSession(request, env),
+        url.searchParams.get("note")
+      );
     }
 
     if (url.pathname === "/") {
-      return renderHome(env, origin);
+      return renderHome(env, origin, await getSession(request, env));
     }
 
     return renderNotFound();

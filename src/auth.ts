@@ -21,7 +21,6 @@ export interface Env {
   DB: D1Database;
   AUDIO: R2Bucket;
   AI: Ai;
-  BATTLE: DurableObjectNamespace;
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;
 }

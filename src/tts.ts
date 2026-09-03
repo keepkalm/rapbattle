@@ -41,5 +41,4 @@ export interface Env {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
-  BATTLE: DurableObjectNamespace;
 }

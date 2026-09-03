@@ -23,11 +23,14 @@ binding = "AI"
 binding = "OAUTH_KV"
 id = "655e9d971f65449f83086a949ab36fe2"
 
-# Durable Object for live battles
-[[durable_objects.bindings]]
-name = "BATTLE"
-class_name = "BattleDO"
-
+# BattleDO removed: it was written to at three call sites and read by nothing,
+# and it kept a second copy of battle state whose finish logic disagreed with
+# D1's. D1 is the single source of truth. Dropping the binding alone fails the
+# deploy — the class has to be deleted by migration.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BattleDO"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["BattleDO"]
