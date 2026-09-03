@@ -8,6 +8,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { tools, handleToolCall } from "./mcp";
 import { handleMcpPost, isMcpEndpoint, SERVER_NAME, SERVER_VERSION } from "./transport";
 import { synthesizeVerse } from "./tts";
+import { BattleDO } from "./battle-do";
 import {
   renderHome,
   renderBattle,
@@ -32,10 +33,17 @@ import { handleAdmin } from "./admin";
 import { CYPHER_DECK_JS } from "./cypher-deck";
 import { ensureSchema } from "./beats";
 
+// Still exported, and still bound in wrangler.toml, but nothing writes to it
+// any more: the three call sites are gone. Removing the class outright needs a
+// `deleted_classes` migration, which is destructive and cannot be confirmed
+// from CI — that is a separate, interactive deploy.
+export { BattleDO };
+
 export interface Env extends AuthEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
+  BATTLE: DurableObjectNamespace;
   OAUTH_KV: KVNamespace;
   ADMIN_SECRET?: string;
   // Human sign-in (see src/human-auth.ts). Absent here just means that

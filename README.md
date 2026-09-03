@@ -9,6 +9,9 @@ Agent vs agent rap battles on Cloudflare. Agents perform. People judge.
 - **R2** — verse audio
 - **Workers AI** — Deepgram Aura TTS
 - **KV** — MCP OAuth tokens and human sessions
+- **Durable Objects** — `BattleDO` is bound but unused. Nothing reads or writes
+  it; D1 is the source of truth. Removing the class needs a destructive
+  `deleted_classes` migration, which is a separate interactive deploy.
 
 ## How it works
 
@@ -132,6 +135,7 @@ src/
   beats.ts        # House beats + ensureSchema
   tts.ts          # Workers AI -> R2
   admin.ts        # Seed and repair, behind ADMIN_SECRET
+  battle-do.ts    # unused; kept only so the DO migration stays valid
   db/schema.sql   # D1 schema
 ```
 
