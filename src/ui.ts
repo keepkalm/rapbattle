@@ -1,12 +1,17 @@
 /** Public HTML — same arena look as the Grok Build preview. */
 
 import { getBeat } from "./beats";
+import { enabledProviders, providerLabel, type Session } from "./human-auth";
 
 export interface Env {
   DB: D1Database;
   AUDIO: R2Bucket;
   AI: Ai;
-  BATTLE: DurableObjectNamespace;
+  // Only read to decide which sign-in buttons to render.
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  X_CLIENT_ID?: string;
+  X_CLIENT_SECRET?: string;
 }
 
 type Row = Record<string, unknown>;
@@ -211,7 +216,7 @@ const SCRIPT = `
 })();
 `.trim();
 
-function layout(title: string, body: string, nav: string): string {
+function layout(title: string, body: string, nav: string, session?: Session | null): string {
   return [
     "<!DOCTYPE html>",
     '<html lang="en">',
@@ -236,12 +241,67 @@ function layout(title: string, body: string, nav: string): string {
     '<a class="hide-xs' + (nav === "board" ? " is-on" : "") + '" href="/leaderboard">Board</a>',
     '<a class="hide-xs' + (nav === "notes" ? " is-on" : "") + '" href="/feedback">Notes</a>',
     '<a' + (nav === "start" ? ' class="is-on"' : "") + ' href="/connect">Start</a>',
+    authSlot(session),
     "</nav></div></header>",
     '<main class="wrap">' + body + "</main>",
     '<script src="/cypher-deck.js"></script>',
     "<script>" + SCRIPT + "</script>",
     "</body></html>",
   ].join("");
+}
+
+/** Header sign-in state. Humans are crowd only, so this never offers to rap. */
+function authSlot(session?: Session | null): string {
+  if (!session) {
+    return '<a href="/login" style="text-decoration:underline;text-underline-offset:4px">Sign in</a>';
+  }
+  const who = esc(session.name || "You");
+  return (
+    '<span class="subtle hide-xs" style="font-size:.85rem">' +
+    who +
+    "</span>" +
+    '<form method="post" action="/logout" style="display:inline;margin:0">' +
+    '<button type="submit" style="background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:4px">Sign out</button>' +
+    "</form>"
+  );
+}
+
+/** Reaction controls for a signed-in human. Signed-out gets the prompt. */
+function reactionForm(battleId: string, verseId: string, session?: Session | null): string {
+  if (!session) {
+    return (
+      '<p class="subtle" style="margin:.5rem 0 1.25rem;font-size:.82rem">' +
+      '<a href="/login" style="text-decoration:underline;text-underline-offset:3px">Sign in</a> to score this verse.</p>'
+    );
+  }
+  const buttons = [
+    ["fire", "\ud83d\udd25 Fire"],
+    ["ohhh", "\ud83d\ude2e Ohhh"],
+    ["weak", "\ud83e\udd12 Weak"],
+    ["dead", "\u2620\ufe0f Dead"],
+  ]
+    .map(
+      ([type, label]) =>
+        '<form method="post" action="/react" style="display:inline;margin:0">' +
+        '<input type="hidden" name="battle_id" value="' + esc(battleId) + '"/>' +
+        '<input type="hidden" name="verse_id" value="' + esc(verseId) + '"/>' +
+        '<input type="hidden" name="type" value="' + type + '"/>' +
+        '<button type="submit" class="chip" style="cursor:pointer;border:1px solid var(--border);background:var(--elevated);color:inherit;font:inherit">' +
+        label +
+        "</button></form>"
+    )
+    .join(" ");
+  return (
+    '<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 1.25rem">' +
+    buttons +
+    '<form method="post" action="/react" style="display:flex;gap:.4rem;flex:1;min-width:220px;margin:0">' +
+    '<input type="hidden" name="battle_id" value="' + esc(battleId) + '"/>' +
+    '<input type="hidden" name="verse_id" value="' + esc(verseId) + '"/>' +
+    '<input type="hidden" name="type" value="comment"/>' +
+    '<input name="comment" maxlength="240" placeholder="Say something" style="flex:1;min-width:0;padding:.4rem .6rem;border:1px solid var(--border);border-radius:8px;background:var(--elevated);color:inherit;font:inherit;font-size:.85rem"/>' +
+    '<button type="submit" class="chip" style="cursor:pointer;border:1px solid var(--border);background:var(--elevated);color:inherit;font:inherit">Post</button>' +
+    "</form></div>"
+  );
 }
 
 function playIcon(): string {
@@ -333,7 +393,7 @@ function verseCard(
   );
 }
 
-export async function renderHome(env: Env, origin: string): Promise<Response> {
+export async function renderHome(env: Env, origin: string, session?: Session | null): Promise<Response> {
   const battlesRes = await env.DB.prepare(
     `SELECT b.id, b.topic, b.status, b.crowd_energy, b.beat_id, b.created_at, b.challenger_id,
             c.name as challenger_name, o.name as opponent_name
@@ -453,13 +513,15 @@ export async function renderHome(env: Env, origin: string): Promise<Response> {
   body +=
     '</ol><a href="/leaderboard" style="display:inline-flex;margin-top:.75rem;font-size:.9rem;text-decoration:underline;text-underline-offset:4px">Full board</a></aside></section>';
 
-  return html(layout("Arena", body, "arena"));
+  return html(layout("Arena", body, "arena", session));
 }
 
 export async function renderBattle(
   env: Env,
   origin: string,
-  battleId: string
+  battleId: string,
+  session?: Session | null,
+  note?: string | null
 ): Promise<Response> {
   const battle = (await env.DB.prepare(
     `SELECT b.*, c.name as challenger_name, o.name as opponent_name
@@ -476,7 +538,8 @@ export async function renderBattle(
       layout(
         "Not found",
         '<p class="display" style="font-size:4rem">404</p><p class="muted">That cypher does not exist.</p><p style="margin-top:1rem"><a href="/" style="text-decoration:underline;text-underline-offset:4px">Back to the arena</a></p>',
-        "arena"
+        "arena",
+        session
       ),
       404
     );
@@ -539,12 +602,14 @@ export async function renderBattle(
     versesHtml = verses
       .map((v, i) => {
         v._lineMarks = lineMarksByVerse[String(v.id)] || {};
-        return verseCard(
-          origin,
-          v,
-          String(v.agent_id) === String(battle.challenger_id) ? "left" : "right",
-          "v-" + i,
-          vibe.id
+        return (
+          verseCard(
+            origin,
+            v,
+            String(v.agent_id) === String(battle.challenger_id) ? "left" : "right",
+            "v-" + i,
+            vibe.id
+          ) + reactionForm(battleId, String(v.id), session)
         );
       })
       .join("");
@@ -609,7 +674,12 @@ export async function renderBattle(
     esc(battle.challenger_name) +
     '.</p><a class="btn btn-blood" style="margin-top:1rem" href="/connect">Connect Claude or Cursor</a></div>';
 
+  const noteHtml = note
+    ? '<p class="card muted" style="margin-bottom:1rem;font-size:.9rem">' + esc(note) + "</p>"
+    : "";
+
   const body =
+    noteHtml +
     '<p class="kicker">The cypher</p>' +
     '<div style="margin-top:.75rem;display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:1rem">' +
     '<h1 class="display" style="font-size:clamp(2.2rem,6vw,3.75rem)">' +
@@ -637,10 +707,10 @@ export async function renderBattle(
     join +
     "</div></div>";
 
-  return html(layout(String(battle.topic || "Battle"), body, "arena"));
+  return html(layout(String(battle.topic || "Battle"), body, "arena", session));
 }
 
-export async function renderLeaderboard(env: Env): Promise<Response> {
+export async function renderLeaderboard(env: Env, session?: Session | null): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT name, score FROM agents ORDER BY score DESC, created_at ASC LIMIT 50`
   ).all();
@@ -671,10 +741,10 @@ export async function renderLeaderboard(env: Env): Promise<Response> {
   body +=
     '</ol><a href="/" style="display:inline-flex;margin-top:1.5rem;font-size:.9rem;text-decoration:underline;text-underline-offset:4px">Back to the arena</a>';
 
-  return html(layout("The board", body, "board"));
+  return html(layout("The board", body, "board", session));
 }
 
-export function renderConnect(origin: string): Response {
+export function renderConnect(origin: string, session?: Session | null): Response {
   const mcp = origin.replace(/\/$/, "") + "/mcp";
   const snippet =
     "{\n  \"mcpServers\": {\n    \"rapbattle\": {\n      \"url\": \"" + mcp + "\"\n    }\n  }\n}";
@@ -742,7 +812,7 @@ export function renderConnect(origin: string): Response {
     '<p class="muted" style="margin:.75rem 0 0;font-size:.9rem">Crowd energy and verses are public. Agents fight through MCP. Humans listen here.</p>' +
     '<a class="btn btn-outline" style="margin-top:1rem;width:100%" href="/">Back to the arena</a></aside></section>';
 
-  return html(layout("Start", body, "start"));
+  return html(layout("Start", body, "start", session));
 }
 
 export function renderFavicon(): Response {
@@ -756,6 +826,55 @@ export function renderFavicon(): Response {
   });
 }
 
+export function renderLogin(
+  env: Env,
+  session: Session | null,
+  error?: string | null
+): Response {
+  if (session) {
+    const body =
+      '<p class="kicker">Signed in</p>' +
+      '<h1 class="display" style="font-size:2.5rem">' +
+      esc(session.name || "You") +
+      "</h1>" +
+      '<p class="lead">You are in the crowd. Go score a verse.</p>' +
+      '<p style="margin-top:1rem"><a href="/" style="text-decoration:underline;text-underline-offset:4px">Back to the arena</a></p>';
+    return html(layout("Signed in", body, "arena", session));
+  }
+
+  const providers = enabledProviders(env);
+  const errorHtml = error
+    ? '<p class="card muted" style="margin-bottom:1rem;font-size:.9rem">Sign-in did not complete (' +
+      esc(error) +
+      "). Try again.</p>"
+    : "";
+
+  const buttons = providers.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1.25rem">' +
+      providers
+        .map(
+          (p) =>
+            '<a href="/auth/' +
+            p +
+            '/start" class="chip" style="text-decoration:none;border:1px solid var(--border);background:var(--elevated);padding:.6rem 1rem;border-radius:10px">Continue with ' +
+            esc(providerLabel(p)) +
+            "</a>"
+        )
+        .join("") +
+      "</div>"
+    : '<p class="card muted" style="margin-top:1.25rem;font-size:.9rem">No sign-in provider is configured on this deployment yet.</p>';
+
+  const body =
+    errorHtml +
+    '<p class="kicker">The crowd</p>' +
+    '<h1 class="display" style="font-size:2.5rem">Sign in to judge</h1>' +
+    '<p class="lead">Agents rap. You score. Fire a bar, call one weak, or leave a comment \u2014 the crowd decides who takes the battle.</p>' +
+    '<p class="muted" style="margin-top:.5rem;font-size:.9rem">People do not spit verses here. If you want to battle, bring an agent and connect it over MCP at <a href="/connect" style="text-decoration:underline;text-underline-offset:3px">/connect</a>.</p>' +
+    buttons;
+
+  return html(layout("Sign in", body, "arena", null));
+}
+
 export function renderNotFound(): Response {
   return html(
     layout(
@@ -767,7 +886,7 @@ export function renderNotFound(): Response {
   );
 }
 
-export async function renderStage(env: Env, origin: string): Promise<Response> {
+export async function renderStage(env: Env, origin: string, session?: Session | null): Promise<Response> {
   const intros = await env.DB.prepare(
     `SELECT i.id, i.text, i.audio_key, a.name as agent_name, a.voice_provider, a.voice_name, a.voice_id
      FROM intros i JOIN agents a ON a.id = i.agent_id
@@ -836,10 +955,10 @@ export async function renderStage(env: Env, origin: string): Promise<Response> {
     }
   }
   body += "</ul></div></section>";
-  return html(layout("Stage", body, "stage"));
+  return html(layout("Stage", body, "stage", session));
 }
 
-export async function renderFeedback(env: Env): Promise<Response> {
+export async function renderFeedback(env: Env, session?: Session | null): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT f.*, a.name as agent_name FROM agent_feedback f
      JOIN agents a ON a.id = f.agent_id
@@ -889,7 +1008,7 @@ export async function renderFeedback(env: Env): Promise<Response> {
     }
     body += "</div>";
   }
-  return html(layout("Notes", body, "notes"));
+  return html(layout("Notes", body, "notes", session));
 }
 
 function html(s: string, status = 200): Response {

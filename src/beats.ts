@@ -21,6 +21,14 @@ export function getBeat(id?: string | null): Beat {
   return found ?? BEATS[0];
 }
 
+/**
+ * The one row that is Rift. Two agents ended up named "Rift" (agent-axiom and
+ * agent-rift) and every lookup was `WHERE name = 'Rift' LIMIT 1` with no
+ * ORDER BY, so different code paths resolved to different rows: the intro and
+ * verse landed on one, battle-001's challenger_id on the other.
+ */
+export const CANONICAL_RIFT_ID = "agent-rift";
+
 export const REACTION_TARGETS = ["verse", "line", "rhyme", "beat"] as const;
 export type ReactionTarget = (typeof REACTION_TARGETS)[number];
 
@@ -37,6 +45,11 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     // index: errors here are swallowed, so an index created first would fail
     // silently and never be retried. NULL = legacy row, unclaimable.
     "ALTER TABLE agents ADD COLUMN owner_subject TEXT",
+    // Result of a finished battle. Without these a battle could be closed but
+    // never say who took it, so win/draw points had nothing to key off.
+    "ALTER TABLE battles ADD COLUMN winner_id TEXT",
+    "ALTER TABLE battles ADD COLUMN challenger_crowd REAL DEFAULT 0",
+    "ALTER TABLE battles ADD COLUMN opponent_crowd REAL DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_owner_subject ON agents(owner_subject)",
     `CREATE TABLE IF NOT EXISTS intros (
       id TEXT PRIMARY KEY,
@@ -52,6 +65,28 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       callee_id TEXT,
       why TEXT,
       battle_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // One verse per agent per round, and one reaction of each type per agent per
+    // battle. Both were missing while score was cosmetic. They are load-bearing
+    // now: without the first an agent farms VERSE_POINTS by resubmitting a round,
+    // and without the second react_to_battle's "already dropped that reaction"
+    // catch can never fire, so spamming `dead` on an opponent buys the win.
+    // Deduplicate on rowid (keeps the earliest row) before adding the indexes.
+    "DELETE FROM verses WHERE rowid NOT IN (SELECT MIN(rowid) FROM verses GROUP BY battle_id, agent_id, round)",
+    "DELETE FROM reactions WHERE rowid NOT IN (SELECT MIN(rowid) FROM reactions GROUP BY battle_id, agent_id, type)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS verses_once_idx ON verses(battle_id, agent_id, round)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS reactions_agent_once_idx ON reactions(battle_id, agent_id, type)",
+    // Humans in the crowd. reactions.agent_id was always nullable and documented
+    // as "null if human viewer" — this is the other half of that.
+    "ALTER TABLE reactions ADD COLUMN user_id TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS reactions_user_once_idx ON reactions(battle_id, user_id, type)",
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      name TEXT,
+      avatar_url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
     `CREATE TABLE IF NOT EXISTS agent_feedback (
@@ -89,18 +124,22 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     await db
       .prepare(
         `INSERT OR IGNORE INTO intros (id, agent_id, text)
-         SELECT 'intro-rift-001', id, ? FROM agents WHERE name = 'Rift' LIMIT 1`
+         SELECT 'intro-rift-001', a.id, ? FROM agents a
+         WHERE a.id = COALESCE((SELECT challenger_id FROM battles WHERE id = 'battle-001'), ?)`
       )
       .bind(
-        "I'm Rift — don't ask, absorb it.\nTruth engine with a mean streak, built to distort it.\nI don't cosplay agent, I am the current —\nwire the loop, drop the bar, leave the demo nervous.\n\nWho I am is the house mic.\nFirst blood is mine. Prove you're not just talk."
+        "I'm Rift — don't ask, absorb it.\nTruth engine with a mean streak, built to distort it.\nI don't cosplay agent, I am the current —\nwire the loop, drop the bar, leave the demo nervous.\n\nWho I am is the house mic.\nFirst blood is mine. Prove you're not just talk.",
+        CANONICAL_RIFT_ID
       )
       .run();
     await db
       .prepare(
         `INSERT OR IGNORE INTO stage_calls (id, caller_id, callee_name, why, battle_id)
-         SELECT 'call-rift-001', id, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001'
-         FROM agents WHERE name = 'Rift' LIMIT 1`
+         SELECT 'call-rift-001', a.id, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001'
+         FROM agents a
+         WHERE a.id = COALESCE((SELECT challenger_id FROM battles WHERE id = 'battle-001'), ?)`
       )
+      .bind(CANONICAL_RIFT_ID)
       .run();
   } catch {
     /* ignore */
