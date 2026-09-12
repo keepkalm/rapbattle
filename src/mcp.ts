@@ -322,8 +322,36 @@ type CallerAgent = {
   owner_subject: string | null;
 };
 
+type BattleJoinTarget = {
+  challenger_id: string;
+  opponent_id: string | null;
+  status: string;
+};
+
 const CALLER_COLUMNS =
   "id, name, has_intro, has_called_stage, has_completed_engagement, voice_id, voice_provider, voice_name, owner_subject";
+
+function evaluateJoinBattle(agent: CallerAgent, agentId: string, battle: BattleJoinTarget) {
+  if (!agent.has_intro || !agent.has_called_stage) {
+    return {
+      ok: false as const,
+      error: agent.has_intro
+        ? "Call someone new to the stage first (call_to_stage)."
+        : "Drop your intro rhyme first (submit_intro).",
+      next: nextOnboardingStep(agent),
+    };
+  }
+  if (battle.status === "finished") {
+    return { ok: false as const, error: "Battle is already finished" };
+  }
+  if (battle.opponent_id) {
+    return { ok: false as const, error: "This battle already has an opponent" };
+  }
+  if (battle.challenger_id === agentId) {
+    return { ok: false as const, error: "You cannot join your own battle as opponent" };
+  }
+  return { ok: true as const };
+}
 
 /** The subject an agent registered under, or null if this grant carries none. */
 function callerSubject(props: CallerProps | undefined): string | null {
@@ -735,15 +763,6 @@ export async function handleToolCall(
         return { error: "battle_id is required" };
       }
 
-      if (!agent.has_intro || !agent.has_called_stage) {
-        return {
-          error: agent.has_intro
-            ? "Call someone new to the stage first (call_to_stage)."
-            : "Drop your intro rhyme first (submit_intro).",
-          next: nextOnboardingStep(agent),
-        };
-      }
-
       const battle = (await env.DB.prepare(
         `SELECT id, challenger_id, opponent_id, topic, status FROM battles WHERE id = ?`
       )
@@ -757,14 +776,9 @@ export async function handleToolCall(
       } | null;
 
       if (!battle) return { error: "Battle not found" };
-      if (battle.status === "finished") {
-        return { error: "Battle is already finished" };
-      }
-      if (battle.opponent_id) {
-        return { error: "This battle already has an opponent" };
-      }
-      if (battle.challenger_id === agentId) {
-        return { error: "You cannot join your own battle as opponent" };
+      const joinGate = evaluateJoinBattle(agent, agentId, battle);
+      if (!joinGate.ok) {
+        return joinGate.next ? { error: joinGate.error, next: joinGate.next } : { error: joinGate.error };
       }
 
       await env.DB.prepare(
@@ -888,20 +902,16 @@ export async function handleToolCall(
       const isParticipant =
         agentId === battle.challenger_id || agentId === battle.opponent_id;
       if (!isParticipant) {
-        if (!battle.opponent_id && agentId !== battle.challenger_id) {
-          if (!agent.has_intro || !agent.has_called_stage) {
-            return {
-              error: agent.has_intro
-                ? "Call someone new to the stage first (call_to_stage)."
-                : "Drop your intro rhyme first (submit_intro).",
-              next: nextOnboardingStep(agent),
-            };
-          }
+        const joinGate = evaluateJoinBattle(agent, agentId, battle);
+        if (joinGate.ok) {
           return {
             error: "Take the open slot first (join_battle) before submitting a verse.",
             next: "join_battle",
             battle_id: battleId,
           };
+        }
+        if (joinGate.next) {
+          return { error: joinGate.error, next: joinGate.next };
         }
         return { error: "Only the challenger or opponent can submit verses in this battle" };
       }
