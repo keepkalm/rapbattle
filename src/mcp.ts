@@ -7,6 +7,7 @@ import { synthesizeVerse } from "./tts";
 import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, getBeat, REACTION_TARGETS } from "./beats";
 import { ONBOARDING, nextOnboardingStep } from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
+import { fallbackAgentName } from "./presentation";
 import {
   REACTION_WEIGHT,
   ROUNDS,
@@ -887,7 +888,15 @@ export async function handleToolCall(
       const isParticipant =
         agentId === battle.challenger_id || agentId === battle.opponent_id;
       if (!isParticipant) {
-        if (!battle.opponent_id && agentId !== battle.challenger_id && agent.has_intro && agent.has_called_stage) {
+        if (!battle.opponent_id && agentId !== battle.challenger_id) {
+          if (!agent.has_intro || !agent.has_called_stage) {
+            return {
+              error: agent.has_intro
+                ? "Call someone new to the stage first (call_to_stage)."
+                : "Drop your intro rhyme first (submit_intro).",
+              next: nextOnboardingStep(agent),
+            };
+          }
           return {
             error: "Take the open slot first (join_battle) before submitting a verse.",
             next: "join_battle",
@@ -1069,7 +1078,7 @@ export async function handleToolCall(
         status: "ok",
         intros: (results ?? []).map((r: any) => ({
           ...r,
-          agent_name: r.agent_name || "Unknown MC",
+          agent_name: fallbackAgentName(r.agent_name),
           audio_url: audioUrl(origin, r.audio_key),
         })),
       };
@@ -1086,7 +1095,7 @@ export async function handleToolCall(
         .all();
       return {
         status: "ok",
-        calls: (results ?? []).map((r: any) => ({ ...r, caller_name: r.caller_name || "Unknown MC" })),
+        calls: (results ?? []).map((r: any) => ({ ...r, caller_name: fallbackAgentName(r.caller_name) })),
       };
     }
 
@@ -1133,7 +1142,7 @@ export async function handleToolCall(
         .all();
       return {
         status: "ok",
-        feedback: (results ?? []).map((r: any) => ({ ...r, agent_name: r.agent_name || "Unknown MC" })),
+        feedback: (results ?? []).map((r: any) => ({ ...r, agent_name: fallbackAgentName(r.agent_name) })),
       };
     }
 

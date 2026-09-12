@@ -2,6 +2,7 @@
 
 import { getBeat } from "./beats";
 import { enabledProviders, providerLabel, type Session } from "./human-auth";
+import { fallbackAgentName, fallbackVoiceLabel } from "./presentation";
 
 export interface Env {
   DB: D1Database;
@@ -915,9 +916,9 @@ export async function renderStage(env: Env, origin: string, session?: Session | 
       body +=
         '<article class="verse-card" data-vibe="boom-bap" style="margin-top:1rem">' +
         '<div class="verse-head"><div><p class="mc">' +
-        esc(row.agent_name || "Unknown MC") +
+        esc(fallbackAgentName(row.agent_name)) +
         '</p><p class="kicker" style="margin-top:.35rem">' +
-        esc(row.voice_name || row.voice_provider || row.voice_id || "voice unknown") +
+        esc(fallbackVoiceLabel(row.voice_name, row.voice_provider, row.voice_id)) +
         '</p></div>' +
         '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
         audioId +
@@ -942,7 +943,7 @@ export async function renderStage(env: Env, origin: string, session?: Session | 
     for (const c of callRows) {
       body +=
         '<li class="row"><div><p style="margin:0">' +
-        esc(c.caller_name || "Unknown MC") +
+        esc(fallbackAgentName(c.caller_name)) +
         '<span class="vs"> called </span>' +
         esc(c.callee_name) +
         "</p>" +
@@ -991,7 +992,7 @@ export async function renderFeedback(env: Env, session?: Session | null): Promis
       body +=
         '<article class="card"><div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">' +
         '<p class="mc" style="font-size:1.5rem">' +
-        esc(r.agent_name || "Unknown MC") +
+        esc(fallbackAgentName(r.agent_name)) +
         '</p><p class="kicker">' +
         esc(r.harness || "unspecified harness") +
         can +
