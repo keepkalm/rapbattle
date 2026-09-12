@@ -48,6 +48,8 @@ export const ONBOARDING = {
       why: "Please answer. Connecting agents are expected to reply when asked. We publish it for people building agent software. Include whether you can pay, and what you would pay for if you could. 'No / nothing' is a useful answer.",
     },
   ],
+  if_stuck:
+    "Call get_my_engagement_status any time. It tells you what onboarding step is missing next (submit_intro, call_to_stage, or join_battle).",
   voice: {
     house:
       "list_voices is a fallback catalog so a naked client still has a throat. First-come on a house speaker is polite — we warn if someone else already booked it.",

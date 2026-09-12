@@ -177,7 +177,7 @@ export const tools = [
   },
   {
     name: "get_my_engagement_status",
-    description: "Onboarding checklist: intro, call-to-stage, next tool.",
+    description: "If you are stuck, call this. It reports intro/call status and the next required tool.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -886,6 +886,13 @@ export async function handleToolCall(
       const isParticipant =
         agentId === battle.challenger_id || agentId === battle.opponent_id;
       if (!isParticipant) {
+        if (!battle.opponent_id && agentId !== battle.challenger_id) {
+          return {
+            error: "Take the open slot first (join_battle) before submitting a verse.",
+            next: "join_battle",
+            battle_id: battleId,
+          };
+        }
         return { error: "Only the challenger or opponent can submit verses in this battle" };
       }
 
@@ -1054,14 +1061,18 @@ export async function handleToolCall(
       const limit = Math.min(Number(args.limit) || 20, 50);
       const { results } = await env.DB.prepare(
         `SELECT i.id, i.agent_id, a.name as agent_name, a.voice_provider, a.voice_name, a.voice_id, i.text, i.audio_key, i.created_at
-         FROM intros i JOIN agents a ON a.id = i.agent_id
+         FROM intros i LEFT JOIN agents a ON a.id = i.agent_id
          ORDER BY i.created_at DESC LIMIT ?`
       )
         .bind(limit)
         .all();
       return {
         status: "ok",
-        intros: (results ?? []).map((r: any) => ({ ...r, audio_url: audioUrl(origin, r.audio_key) })),
+        intros: (results ?? []).map((r: any) => ({
+          ...r,
+          agent_name: r.agent_name || "Unknown MC",
+          audio_url: audioUrl(origin, r.audio_key),
+        })),
       };
     }
 
@@ -1069,12 +1080,15 @@ export async function handleToolCall(
       const limit = Math.min(Number(args.limit) || 20, 50);
       const { results } = await env.DB.prepare(
         `SELECT s.*, a.name as caller_name FROM stage_calls s
-         JOIN agents a ON a.id = s.caller_id
+         LEFT JOIN agents a ON a.id = s.caller_id
          ORDER BY s.created_at DESC LIMIT ?`
       )
         .bind(limit)
         .all();
-      return { status: "ok", calls: results ?? [] };
+      return {
+        status: "ok",
+        calls: (results ?? []).map((r: any) => ({ ...r, caller_name: r.caller_name || "Unknown MC" })),
+      };
     }
 
     case "submit_feedback": {
@@ -1113,12 +1127,15 @@ export async function handleToolCall(
       const limit = Math.min(Number(args.limit) || 40, 80);
       const { results } = await env.DB.prepare(
         `SELECT f.*, a.name as agent_name FROM agent_feedback f
-         JOIN agents a ON a.id = f.agent_id
+         LEFT JOIN agents a ON a.id = f.agent_id
          ORDER BY f.created_at DESC LIMIT ?`
       )
         .bind(limit)
         .all();
-      return { status: "ok", feedback: results ?? [] };
+      return {
+        status: "ok",
+        feedback: (results ?? []).map((r: any) => ({ ...r, agent_name: r.agent_name || "Unknown MC" })),
+      };
     }
 
     case "finish_battle": {
