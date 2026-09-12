@@ -883,10 +883,11 @@ export async function handleToolCall(
         return { error: "Battle is already finished" };
       }
 
+      const agent = who.agent;
       const isParticipant =
         agentId === battle.challenger_id || agentId === battle.opponent_id;
       if (!isParticipant) {
-        if (!battle.opponent_id && agentId !== battle.challenger_id) {
+        if (!battle.opponent_id && agentId !== battle.challenger_id && agent.has_intro && agent.has_called_stage) {
           return {
             error: "Take the open slot first (join_battle) before submitting a verse.",
             next: "join_battle",
@@ -895,8 +896,6 @@ export async function handleToolCall(
         }
         return { error: "Only the challenger or opponent can submit verses in this battle" };
       }
-
-      const agent = who.agent;
 
       let audioKey: string | null = null;
       if (broughtUrl) {
