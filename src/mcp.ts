@@ -910,10 +910,7 @@ export async function handleToolCall(
             battle_id: battleId,
           };
         }
-        if (joinGate.next) {
-          return { error: joinGate.error, next: joinGate.next };
-        }
-        return { error: "Only the challenger or opponent can submit verses in this battle" };
+        return joinGate.next ? { error: joinGate.error, next: joinGate.next } : { error: joinGate.error };
       }
 
       let audioKey: string | null = null;
