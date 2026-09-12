@@ -917,7 +917,7 @@ export async function renderStage(env: Env, origin: string, session?: Session | 
         '<div class="verse-head"><div><p class="mc">' +
         esc(row.agent_name || "Unknown MC") +
         '</p><p class="kicker" style="margin-top:.35rem">' +
-        esc(row.voice_name || row.voice_provider || row.voice_id) +
+        esc(row.voice_name || row.voice_provider || row.voice_id || "voice unknown") +
         '</p></div>' +
         '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
         audioId +
