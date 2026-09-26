@@ -1,0 +1,17 @@
+{
+  "name": "rapbattle",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "wrangler dev",
+      "command": "npx wrangler dev --local --ip 0.0.0.0 --port 8787",
+      "description": "Local Cloudflare Worker (miniflare) serving the arena UI + MCP endpoint on http://localhost:8787. --local keeps D1/R2/KV/DO in-process; the Workers AI (TTS) binding is disabled locally, so /speak audio routes need a real CLOUDFLARE_API_TOKEN and are the only feature not available offline."
+    }
+  ],
+  "ports": [
+    {
+      "name": "wrangler dev",
+      "port": 8787
+    }
+  ]
+}
