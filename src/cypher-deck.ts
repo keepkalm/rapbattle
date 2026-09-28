@@ -1,6 +1,9 @@
 /** Browser vibe deck, served as /cypher-deck.js */
 
+import { POCKET_JS } from "./beats";
+
 export const CYPHER_DECK_JS = `"use strict";
+${POCKET_JS}
 window.createCypherDeck = function () {
   var STEPS = 16;
   var VIBES = {
@@ -22,7 +25,7 @@ window.createCypherDeck = function () {
     ctx: null, master: null, drums: null, vocals: null, noise: null,
     timer: null, uiTimer: null, endTimer: null,
     nextStep: 0, nextTime: 0, originTime: 0, running: false,
-    vocalSource: null, vocalStart: 0, vocalEnd: 0, lineCount: 1,
+    vocalSource: null, vocalSources: [], vocalStart: 0, vocalEnd: 0, phraseStarts: null, lineCount: 1,
     lastBeat: -1, lastLine: -1, handlers: {},
     vibe: "boom-bap", bpm: 90, swing: 0.58,
     setVibe: function (id) {
@@ -65,7 +68,7 @@ window.createCypherDeck = function () {
       this.nextTime = ctx.currentTime + 0.03;
       this.originTime = this.nextTime;
       this.lastBeat = -1; this.lastLine = -1;
-      this.vocalStart = 0; this.vocalEnd = 0;
+      this.vocalStart = 0; this.vocalEnd = 0; this.phraseStarts = null;
       if (this.handlers.onPhase) this.handlers.onPhase("countin");
       this.scheduler();
       this.pulseUi();
@@ -78,46 +81,211 @@ window.createCypherDeck = function () {
       if (this.endTimer) clearTimeout(this.endTimer);
       this.endTimer = setTimeout(function () { if (self.running) self.stop(); }, wait * 1000);
     },
-    drop: function (arrayBuffer, lineCount) {
+    silenceVocals: function () {
+      var list = this.vocalSources || [];
+      this.vocalSources = [];
+      var previous = this.vocalSource;
+      this.vocalSource = null;
+      for (var i = 0; i < list.length; i++) {
+        try { list[i].stop(); } catch (e) {}
+      }
+      if (previous) {
+        try { previous.stop(); } catch (e2) {}
+      }
+    },
+    nextDownbeat: function () {
+      var step = this.nextStep;
+      var time = this.nextTime;
+      var bar = this.barLength();
+      while (step % STEPS !== 0 || step < STEPS) {
+        step += 1;
+        time += this.stepTime(step) - this.stepTime(step - 1);
+      }
+      if (time < this.ctx.currentTime + 0.08) time += bar;
+      return time;
+    },
+    audibleSpan: function (buffer) {
+      var data = buffer.getChannelData(0);
+      var thresh = 0.012;
+      var i0 = -1;
+      var i1 = 0;
+      for (var i = 0; i < data.length; i++) {
+        if (Math.abs(data[i]) > thresh) { i0 = i; break; }
+      }
+      if (i0 < 0) return null;
+      for (var j = data.length - 1; j >= 0; j--) {
+        if (Math.abs(data[j]) > thresh) { i1 = j; break; }
+      }
+      var pre = Math.floor(buffer.sampleRate * 0.005);
+      var post = Math.floor(buffer.sampleRate * 0.02);
+      var start = Math.max(0, i0 - pre);
+      var end = Math.min(data.length, i1 + 1 + post);
+      return { buffer: buffer, offset: start / buffer.sampleRate, duration: (end - start) / buffer.sampleRate };
+    },
+    splitSilence: function (buffer) {
+      var data = buffer.getChannelData(0);
+      var sr = buffer.sampleRate;
+      var thresh = 0.012;
+      var minGap = Math.floor(sr * 0.18);
+      var minLen = Math.floor(sr * 0.12);
+      var regions = [];
+      var i = 0;
+      while (i < data.length) {
+        while (i < data.length && Math.abs(data[i]) <= thresh) i++;
+        if (i >= data.length) break;
+        var last = i;
+        var gap = 0;
+        var start = i;
+        while (i < data.length) {
+          if (Math.abs(data[i]) > thresh) { last = i; gap = 0; }
+          else {
+            gap++;
+            if (gap >= minGap) break;
+          }
+          i++;
+        }
+        if (last + 1 - start >= minLen) {
+          regions.push({
+            buffer: buffer,
+            offset: start / sr,
+            duration: (last + 1 - start) / sr
+          });
+        }
+      }
+      return regions;
+    },
+    spawnVocal: function (piece, when, rate) {
+      var ctx = this.ctx;
+      var src = ctx.createBufferSource();
+      src.buffer = piece.buffer;
+      src.playbackRate.value = rate;
+      var hp = ctx.createBiquadFilter();
+      hp.type = "highpass"; hp.frequency.value = 90; hp.Q.value = 0.7;
+      src.connect(hp); hp.connect(this.vocals);
+      var played = piece.duration / rate;
+      src.start(when, piece.offset || 0, piece.duration);
+      src.stop(when + played + 0.05);
+      this.vocalSources.push(src);
+      return { src: src, played: played };
+    },
+    armVocal: function (dropTime, vocalEnd) {
+      var self = this;
+      var ctx = this.ctx;
+      this.vocalStart = dropTime;
+      this.vocalEnd = vocalEnd;
+      this.drums.gain.cancelScheduledValues(dropTime);
+      this.drums.gain.setTargetAtTime(0.42, dropTime, 0.06);
+      setTimeout(function () {
+        if (self.running && self.handlers.onPhase) self.handlers.onPhase("verse");
+      }, Math.max(0, (dropTime - ctx.currentTime) * 1000));
+    },
+    playPocket: function (buffer, starts) {
+      if (!this.running) return;
+      var dropTime = this.nextDownbeat();
+      this.silenceVocals();
+      this.phraseStarts = starts;
+      this.lineCount = Math.max(1, starts.length);
+      var piece = { buffer: buffer, offset: 0, duration: buffer.duration };
+      var spawned = this.spawnVocal(piece, dropTime, 1);
+      var vocalEnd = dropTime + buffer.duration;
+      var self = this;
+      spawned.src.onended = function () {
+        if (self.vocalSource === spawned.src) self.finishSoon(vocalEnd);
+      };
+      this.vocalSource = spawned.src;
+      this.armVocal(dropTime, vocalEnd);
+    },
+    playSegments: function (pieces, legacySingle, rate) {
+      if (!this.running || !pieces.length) return;
+      if (!(rate > 0.5 && rate <= 1)) rate = CALM_RATE;
+      var durations = [];
+      for (var i = 0; i < pieces.length; i++) {
+        durations.push(pieces[i] ? pieces[i].duration / rate : 0);
+      }
+      var slots = schedulePhrases(durations, this.bpm);
+      var dropTime = this.nextDownbeat();
+      this.silenceVocals();
+      if (!legacySingle) {
+        this.phraseStarts = slots.map(function (s) { return s.start; });
+        this.lineCount = Math.max(1, slots.length);
+      } else {
+        this.phraseStarts = null;
+      }
+      var self = this;
+      var vocalEnd = dropTime;
+      var lastSrc = null;
+      for (var n = 0; n < pieces.length; n++) {
+        if (!pieces[n]) continue;
+        var when = dropTime + slots[n].start;
+        var spawned = this.spawnVocal(pieces[n], when, rate);
+        lastSrc = spawned.src;
+        vocalEnd = Math.max(vocalEnd, when + spawned.played);
+      }
+      if (slots.length) {
+        var tail = slots[slots.length - 1];
+        var strong = (60 / this.bpm) * 2;
+        vocalEnd = Math.max(vocalEnd, dropTime + tail.start + tail.slots * strong);
+      }
+      if (lastSrc) {
+        lastSrc.onended = function () {
+          if (self.vocalSource === lastSrc) self.finishSoon(vocalEnd);
+        };
+        this.vocalSource = lastSrc;
+      } else {
+        var wait = Math.max(0, (vocalEnd - this.ctx.currentTime) * 1000);
+        setTimeout(function () { if (self.running) self.finishSoon(vocalEnd); }, wait);
+      }
+      this.armVocal(dropTime, vocalEnd);
+    },
+    drop: function (arrayBuffer, lineCount, phraseStartsCsv) {
       var self = this;
       var ctx = this.unlock();
       if (!this.running) this.start(this.handlers);
-      this.lineCount = Math.max(1, lineCount);
-      return ctx.decodeAudioData(arrayBuffer.slice(0)).then(function (buffer) {
-        var bar = self.barLength();
-        var raw = Math.max(0.4, buffer.duration);
-        var bars = Math.max(4, Math.round(raw / bar));
-        var rate = raw / (bars * bar);
-        if (rate < 0.88) { bars = Math.max(4, Math.floor(raw / (0.88 * bar))); rate = raw / (bars * bar); }
-        else if (rate > 1.12) { bars = Math.max(4, Math.ceil(raw / (1.12 * bar))); rate = raw / (bars * bar); }
-        rate = Math.min(1.12, Math.max(0.88, rate));
-        var vocalDur = raw / rate;
-        var step = self.nextStep;
-        var time = self.nextTime;
-        while (step % STEPS !== 0 || step < STEPS) {
-          step += 1;
-          time += self.stepTime(step) - self.stepTime(step - 1);
+      this.lineCount = Math.max(1, lineCount || 1);
+      var starts = [];
+      var pocket = false;
+      if (phraseStartsCsv) {
+        var parts = String(phraseStartsCsv).split(",");
+        var parsed = [];
+        pocket = true;
+        for (var i = 0; i < parts.length; i++) {
+          var n = parseFloat(parts[i]);
+          if (!isFinite(n)) { pocket = false; break; }
+          parsed.push(n);
         }
-        var dropTime = time;
-        if (dropTime < ctx.currentTime + 0.08) dropTime += bar;
-        try { if (self.vocalSource) self.vocalSource.stop(); } catch (e) {}
-        var src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.playbackRate.value = rate;
-        var hp = ctx.createBiquadFilter();
-        hp.type = "highpass"; hp.frequency.value = 90; hp.Q.value = 0.7;
-        src.connect(hp); hp.connect(self.vocals);
-        src.start(dropTime);
-        src.stop(dropTime + vocalDur + 0.05);
-        src.onended = function () { if (self.vocalSource === src) self.finishSoon(dropTime + vocalDur); };
-        self.vocalSource = src;
-        self.vocalStart = dropTime;
-        self.vocalEnd = dropTime + vocalDur;
-        self.drums.gain.cancelScheduledValues(dropTime);
-        self.drums.gain.setTargetAtTime(0.42, dropTime, 0.06);
-        setTimeout(function () {
-          if (self.running && self.handlers.onPhase) self.handlers.onPhase("verse");
-        }, Math.max(0, (dropTime - ctx.currentTime) * 1000));
+        if (pocket && parsed.length) starts = parsed;
+        else pocket = false;
+      }
+      return ctx.decodeAudioData(arrayBuffer.slice(0)).then(function (buffer) {
+        if (!self.running) return;
+        if (pocket) {
+          self.playPocket(buffer, starts);
+          return;
+        }
+        var regions = self.splitSilence(buffer);
+        if (regions.length > 1) {
+          self.playSegments(regions, false);
+          return;
+        }
+        var span = self.audibleSpan(buffer);
+        if (!span) return;
+        self.playSegments([span], true);
+      });
+    },
+    dropPhrases: function (list, calmRate) {
+      var self = this;
+      var ctx = this.unlock();
+      if (!this.running) this.start(this.handlers);
+      var rate = (typeof calmRate === "number" && calmRate > 0.5 && calmRate <= 1) ? calmRate : CALM_RATE;
+      var jobs = (list || []).map(function (buf) {
+        if (!buf) return Promise.resolve(null);
+        return ctx.decodeAudioData(buf.slice(0)).then(function (buffer) {
+          return self.audibleSpan(buffer);
+        });
+      });
+      return Promise.all(jobs).then(function (pieces) {
+        if (!self.running) return;
+        self.playSegments(pieces, false, rate);
       });
     },
     stop: function () { this.stopInternal(true); },
@@ -135,8 +303,7 @@ window.createCypherDeck = function () {
       if (this.timer) { clearTimeout(this.timer); this.timer = null; }
       if (this.endTimer) { clearTimeout(this.endTimer); this.endTimer = null; }
       if (this.uiTimer) { cancelAnimationFrame(this.uiTimer); this.uiTimer = null; }
-      try { if (this.vocalSource) this.vocalSource.stop(); } catch (e) {}
-      this.vocalSource = null;
+      this.silenceVocals();
       if (this.ctx && this.drums && this.master) {
         var now = this.ctx.currentTime;
         this.drums.gain.cancelScheduledValues(now);
@@ -171,14 +338,25 @@ window.createCypherDeck = function () {
         if (this.handlers.onBeat) this.handlers.onBeat(beat);
       }
       if (this.vocalStart && t >= this.vocalStart && this.vocalEnd > this.vocalStart) {
-        var p = Math.min(0.999, Math.max(0, (t - this.vocalStart) / (this.vocalEnd - this.vocalStart)));
-        var line = Math.min(this.lineCount - 1, Math.floor(p * this.lineCount));
+        var line;
+        if (this.phraseStarts && this.phraseStarts.length) {
+          var elapsed = t - this.vocalStart;
+          line = -1;
+          for (var li = 0; li < this.phraseStarts.length; li++) {
+            if (elapsed + 0.03 >= this.phraseStarts[li]) line = li;
+          }
+        } else {
+          var p = Math.min(0.999, Math.max(0, (t - this.vocalStart) / (this.vocalEnd - this.vocalStart)));
+          line = Math.min(this.lineCount - 1, Math.floor(p * this.lineCount));
+        }
         if (line !== this.lastLine) {
           this.lastLine = line;
           if (this.handlers.onLine) this.handlers.onLine(line);
         }
       }
-      this.uiTimer = requestAnimationFrame(function () { self.pulseUi(); });
+      if (typeof requestAnimationFrame === "function") {
+        this.uiTimer = requestAnimationFrame(function () { self.pulseUi(); });
+      }
     },
     hit: function (step, time) {
       var ctx = this.ctx, bus = this.drums, noise = this.noise;
