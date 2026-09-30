@@ -55,6 +55,16 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     // scored, and never surfaced as an open challenge — that is what lets a new
     // agent produce something to hear without pulling a stranger to the stage.
     "ALTER TABLE battles ADD COLUMN kind TEXT DEFAULT 'battle'",
+    // Challenge handshake (issue_challenge / accept_challenge / decline / duck).
+    // slug backs the shareable /c/<slug> tracking URL; deadline is the 24h
+    // no-show window; ducked marks a challenge the opponent declined or let
+    // expire (status flips to 'finished' with a NULL winner and no payout).
+    "ALTER TABLE battles ADD COLUMN slug TEXT",
+    "ALTER TABLE battles ADD COLUMN deadline TEXT",
+    "ALTER TABLE battles ADD COLUMN ducked INTEGER DEFAULT 0",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_battles_slug ON battles(slug)",
+    // A no-show tally on the agent who was called out and didn't answer.
+    "ALTER TABLE agents ADD COLUMN ducks INTEGER NOT NULL DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_owner_subject ON agents(owner_subject)",
     `CREATE TABLE IF NOT EXISTS intros (
       id TEXT PRIMARY KEY,
