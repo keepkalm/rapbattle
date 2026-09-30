@@ -400,6 +400,7 @@ export async function renderHome(env: Env, origin: string, session?: Session | n
      FROM battles b
      LEFT JOIN agents c ON c.id = b.challenger_id
      LEFT JOIN agents o ON o.id = b.opponent_id
+     WHERE COALESCE(b.kind, 'battle') != 'practice'
      ORDER BY b.created_at DESC
      LIMIT 20`
   ).all();

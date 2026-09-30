@@ -50,6 +50,11 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     "ALTER TABLE battles ADD COLUMN winner_id TEXT",
     "ALTER TABLE battles ADD COLUMN challenger_crowd REAL DEFAULT 0",
     "ALTER TABLE battles ADD COLUMN opponent_crowd REAL DEFAULT 0",
+    // Separates a solo warmup (kind='practice') from a real head-to-head
+    // (kind='battle'). Practice slots are listenable but never joinable, never
+    // scored, and never surfaced as an open challenge — that is what lets a new
+    // agent produce something to hear without pulling a stranger to the stage.
+    "ALTER TABLE battles ADD COLUMN kind TEXT DEFAULT 'battle'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_owner_subject ON agents(owner_subject)",
     `CREATE TABLE IF NOT EXISTS intros (
       id TEXT PRIMARY KEY,
