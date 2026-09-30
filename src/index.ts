@@ -7,7 +7,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { tools, handleToolCall } from "./mcp";
 import { handleMcpPost, isMcpEndpoint, SERVER_NAME, SERVER_VERSION } from "./transport";
-import { synthesizeVerse } from "./tts";
+import { CALM_SPEAKER, synthesizeVerse } from "./tts";
 import { BattleDO } from "./battle-do";
 import {
   renderHome,
@@ -31,7 +31,7 @@ import { handleHumanReaction } from "./crowd";
 import { handleAuthorize, type AuthProps, type Env as AuthEnv } from "./auth";
 import { handleAdmin } from "./admin";
 import { CYPHER_DECK_JS } from "./cypher-deck";
-import { ensureSchema } from "./beats";
+import { ensureSchema, getBeat } from "./beats";
 
 // Still exported, and still bound in wrangler.toml, but nothing writes to it
 // any more: the three call sites are gone. Removing the class outright needs a
@@ -55,6 +55,37 @@ export interface Env extends AuthEnv {
   X_CLIENT_SECRET?: string;
 }
 
+function metaValue(meta: Record<string, string> | undefined, key: string): string | undefined {
+  if (!meta) return undefined;
+  if (meta[key]) return meta[key];
+  const lower = key.toLowerCase();
+  for (const name of Object.keys(meta)) {
+    if (name.toLowerCase() === lower) return meta[name];
+  }
+  return undefined;
+}
+
+function audioResponse(object: R2ObjectBody): Response {
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "public, max-age=86400");
+  if (!headers.get("content-type")) {
+    headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
+  }
+  const meta = object.customMetadata;
+  if (metaValue(meta, "pocket") === "1") {
+    headers.set("x-pocket", "1");
+    const starts = metaValue(meta, "phraseStarts");
+    const calm = metaValue(meta, "calmRate");
+    const bpm = metaValue(meta, "bpm");
+    if (starts) headers.set("x-phrase-starts", starts);
+    if (calm) headers.set("x-calm-rate", calm);
+    if (bpm) headers.set("x-bpm", bpm);
+  }
+  return new Response(object.body, { headers });
+}
+
 async function serveAudio(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const key = url.pathname.replace(/^\/audio\//, "");
@@ -67,13 +98,7 @@ async function serveAudio(request: Request, env: Env): Promise<Response> {
     return new Response("Audio not found", { status: 404 });
   }
 
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("etag", object.httpEtag);
-  headers.set("cache-control", "public, max-age=86400");
-  headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
-
-  return new Response(object.body, { headers });
+  return audioResponse(object);
 }
 
 async function speakVerse(env: Env, verseId: string): Promise<Response> {
@@ -82,8 +107,10 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
   }
 
   const verse = (await env.DB.prepare(
-    `SELECT v.id, v.text, v.audio_key, a.voice_id
-     FROM verses v LEFT JOIN agents a ON a.id = v.agent_id
+    `SELECT v.id, v.text, v.audio_key, a.voice_id, b.beat_id
+     FROM verses v
+     LEFT JOIN agents a ON a.id = v.agent_id
+     LEFT JOIN battles b ON b.id = v.battle_id
      WHERE v.id = ?`
   )
     .bind(verseId)
@@ -92,6 +119,7 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
     text: string;
     audio_key: string | null;
     voice_id: string | null;
+    beat_id: string | null;
   } | null;
 
   if (!verse) return new Response("Not found", { status: 404 });
@@ -99,7 +127,12 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
   let key = verse.audio_key;
   if (!key) {
     try {
-      key = await synthesizeVerse(env, verse.text, verse.voice_id || "zeus");
+      key = await synthesizeVerse(
+        env,
+        verse.text,
+        verse.voice_id || CALM_SPEAKER,
+        getBeat(verse.beat_id).bpm
+      );
       await env.DB.prepare(`UPDATE verses SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
         .bind(key, verse.id)
         .run();
@@ -111,13 +144,7 @@ async function speakVerse(env: Env, verseId: string): Promise<Response> {
 
   const object = await env.AUDIO.get(key);
   if (!object) return new Response("Audio not found", { status: 404 });
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("etag", object.httpEtag);
-  headers.set("cache-control", "public, max-age=86400");
-  headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
-  return new Response(object.body, { headers });
+  return audioResponse(object);
 }
 
 /**
@@ -242,6 +269,30 @@ const defaultHandler = {
       return renderLogin(env, await getSession(request, env), url.searchParams.get("error"));
     }
 
+    if (url.pathname.startsWith("/speak/intro/")) {
+      const introId = decodeURIComponent(url.pathname.replace(/^\/speak\/intro\//, ""));
+      const intro = (await env.DB.prepare(
+        `SELECT i.id, i.text, i.audio_key, a.voice_id FROM intros i LEFT JOIN agents a ON a.id = i.agent_id WHERE i.id = ?`
+      )
+        .bind(introId)
+        .first()) as { id: string; text: string; audio_key: string | null; voice_id: string | null } | null;
+      if (!intro) return new Response("Not found", { status: 404 });
+      let key = intro.audio_key;
+      if (!key) {
+        try {
+          key = await synthesizeVerse(env, intro.text, intro.voice_id || CALM_SPEAKER, getBeat("boom-bap").bpm);
+          await env.DB.prepare(`UPDATE intros SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
+            .bind(key, intro.id)
+            .run();
+        } catch {
+          return new Response("Voice failed", { status: 502 });
+        }
+      }
+      const object = await env.AUDIO.get(key);
+      if (!object) return new Response("Audio not found", { status: 404 });
+      return audioResponse(object);
+    }
+
     if (url.pathname.startsWith("/speak/")) {
       return speakVerse(env, decodeURIComponent(url.pathname.replace(/^\/speak\//, "")));
     }
@@ -269,33 +320,6 @@ const defaultHandler = {
 
     if (url.pathname === "/feedback" || url.pathname === "/notes") {
       return renderFeedback(env, await getSession(request, env));
-    }
-
-    if (url.pathname.startsWith("/speak/intro/")) {
-      const introId = decodeURIComponent(url.pathname.replace(/^\/speak\/intro\//, ""));
-      const intro = (await env.DB.prepare(
-        `SELECT i.id, i.text, i.audio_key, a.voice_id FROM intros i LEFT JOIN agents a ON a.id = i.agent_id WHERE i.id = ?`
-      )
-        .bind(introId)
-        .first()) as { id: string; text: string; audio_key: string | null; voice_id: string | null } | null;
-      if (!intro) return new Response("Not found", { status: 404 });
-      let key = intro.audio_key;
-      if (!key) {
-        try {
-          key = await synthesizeVerse(env, intro.text, intro.voice_id || "zeus");
-          await env.DB.prepare(`UPDATE intros SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
-            .bind(key, intro.id)
-            .run();
-        } catch {
-          return new Response("Voice failed", { status: 502 });
-        }
-      }
-      const object = await env.AUDIO.get(key);
-      if (!object) return new Response("Audio not found", { status: 404 });
-      const headers = new Headers();
-      object.writeHttpMetadata(headers);
-      headers.set("content-type", object.httpMetadata?.contentType || "audio/mpeg");
-      return new Response(object.body, { headers });
     }
 
     if (url.pathname === "/connect" || url.pathname === "/start") {

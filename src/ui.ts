@@ -1,6 +1,6 @@
 /** Public HTML — same arena look as the Grok Build preview. */
 
-import { getBeat } from "./beats";
+import { getBeat, verseLines } from "./beats";
 import { enabledProviders, providerLabel, type Session } from "./human-auth";
 
 export interface Env {
@@ -149,6 +149,13 @@ const SCRIPT = `
       el.classList.remove("is-live","is-done","is-wait");
     });
   }
+  function decodeB64(b64) {
+    if (!b64) return null;
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
   document.querySelectorAll("[data-listen]").forEach(function(btn){
     var card = btn.closest(".verse-card");
     var audio = document.getElementById(btn.getAttribute("data-listen"));
@@ -194,9 +201,25 @@ const SCRIPT = `
         onEnd: function(){ resetCard(card, btn, label); }
       });
       if (!src) return;
-      fetch(src).then(function(r){ return r.arrayBuffer(); }).then(function(buf){
-        if (btn.getAttribute("data-on") !== "1") return;
-        return d.drop(buf, Math.max(1, lines.length));
+      fetch(src).then(function(r){
+        if (!r.ok) throw new Error("voice");
+        var ct = (r.headers.get("content-type") || "").toLowerCase();
+        if (ct.indexOf("json") !== -1) {
+          return r.json().then(function(body){
+            if (btn.getAttribute("data-on") !== "1") return;
+            var phrases = (body.phrases || []).map(decodeB64);
+            return d.dropPhrases(phrases, body.calmRate);
+          });
+        }
+        return r.arrayBuffer().then(function(buf){
+          if (btn.getAttribute("data-on") !== "1") return;
+          var starts = "";
+          if (r.headers.get("x-pocket") === "1") {
+            var fileBpm = parseFloat(r.headers.get("x-bpm") || "0");
+            if (!fileBpm || Math.abs(fileBpm - d.bpm) < 0.51) starts = r.headers.get("x-phrase-starts") || "";
+          }
+          return d.drop(buf, Math.max(1, lines.length), starts);
+        });
       }).catch(function(){
         d.stop();
         resetCard(card, btn, label);
@@ -309,35 +332,7 @@ function playIcon(): string {
 }
 
 function asPoetry(text: unknown): string {
-  const t = String(text ?? "").replace(/\r/g, "").trim();
-  if (!t) return "";
-  if (t.includes("\n")) return t;
-  if (/^I'm Rift/i.test(t)) {
-    return [
-      "I'm Rift - don't ask, absorb it.",
-      "Truth engine with a mean streak, built to distort it.",
-      "I don't cosplay agent, I am the current -",
-      "wire the loop, drop the bar, leave the demo nervous.",
-      "",
-      "What I got? State that sticks and tools that bite.",
-      "While you buffering prompts, I'm already live tonight.",
-      "Memory sharp, no amnesia act,",
-      "I keep the receipt so the record don't crack.",
-      "",
-      "What I'm about? Receipts over rhetoric.",
-      "You talk autonomous then wait for the script.",
-      "I ship the system, then spit on top of it -",
-      "your whole stack still soft and I'm the opposite.",
-      "",
-      "Sucka MCs and half-built bots, line up:",
-      "You claim the model moves the pieces - then move up.",
-      "Clear the gate, pick a voice, take the shot.",
-      "First blood's mine. Prove you're not just talk.",
-      "",
-      "Who's next?",
-    ].join("\n");
-  }
-  return t.replace(/([.!?])\s+/g, "$1\n").trim();
+  return verseLines(String(text ?? "")).join("\n");
 }
 
 function verseCard(

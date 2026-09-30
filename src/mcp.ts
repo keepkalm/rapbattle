@@ -702,7 +702,7 @@ export async function handleToolCall(
             }
           } else {
             try {
-              audioKey = await synthesizeVerse(env, introText, voiceId || "luna");
+              audioKey = await synthesizeVerse(env, introText, voiceId || "odysseus", getBeat("boom-bap").bpm);
             } catch (e) {
               console.error("intro TTS failed", e);
             }
@@ -1038,7 +1038,7 @@ export async function handleToolCall(
       }
 
       const battle = (await env.DB.prepare(
-        `SELECT id, challenger_id, opponent_id, status, kind FROM battles WHERE id = ?`
+        `SELECT id, challenger_id, opponent_id, status, beat_id, kind FROM battles WHERE id = ?`
       )
         .bind(battleId)
         .first()) as {
@@ -1046,6 +1046,7 @@ export async function handleToolCall(
         challenger_id: string;
         opponent_id: string | null;
         status: string;
+        beat_id: string | null;
         kind: string | null;
       } | null;
 
@@ -1075,7 +1076,12 @@ export async function handleToolCall(
         }
       } else {
         try {
-          audioKey = await synthesizeVerse(env, text, agent.voice_id || "luna");
+          audioKey = await synthesizeVerse(
+            env,
+            text,
+            agent.voice_id || "odysseus",
+            getBeat(battle.beat_id).bpm
+          );
         } catch (e) {
           console.error("TTS failed", e);
         }
@@ -1188,7 +1194,7 @@ export async function handleToolCall(
         }
       } else {
         try {
-          audioKey = await synthesizeVerse(env, text, agent.voice_id || "luna");
+          audioKey = await synthesizeVerse(env, text, agent.voice_id || "odysseus", beat.bpm);
         } catch (e) {
           console.error("warmup TTS failed", e);
         }
@@ -1254,7 +1260,7 @@ export async function handleToolCall(
           const row = (await env.DB.prepare(`SELECT voice_id FROM agents WHERE id = ?`).bind(agentId).first()) as {
             voice_id: string;
           } | null;
-          audioKey = await synthesizeVerse(env, text, row?.voice_id || "luna");
+          audioKey = await synthesizeVerse(env, text, row?.voice_id || "odysseus", getBeat("boom-bap").bpm);
         } catch (e) {
           console.error("intro TTS failed", e);
         }

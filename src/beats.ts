@@ -22,6 +22,104 @@ export function getBeat(id?: string | null): Beat {
 }
 
 /**
+ * Spoken delivery sits back in the pocket. Workers AI Aura-2 has no speed
+ * field — speaker, encoding, container, sample_rate, bit_rate, text — so the
+ * calm is a playback rate under 1 (deeper, less pushed) applied when each
+ * phrase is placed on the grid. Never above 1: speeding a take is what made
+ * the voice tense.
+ */
+export const CALM_RATE = 0.9;
+
+/** A phrase must finish inside this fraction of its slot, leaving air before the next kick. */
+export const POCKET_FIT = 0.9;
+
+export interface PhraseSlot {
+  index: number;
+  /** Seconds after the downbeat. Always a beat 1 or beat 3 (the kick). */
+  start: number;
+  /** How many kick-to-kick slots (2 quarter notes) this phrase owns. */
+  slots: number;
+}
+
+/**
+ * One implementation of the grid, copied into the browser deck as {@link POCKET_JS}.
+ * `durations` are seconds the phrase will actually occupy after {@link CALM_RATE}.
+ * A zero duration is a rest (blank line) and still holds one kick so the next
+ * line lands on a beat.
+ */
+export function schedulePhrases(durations: number[], bpm: number): PhraseSlot[] {
+  const beat = 60 / bpm;
+  const strong = beat * 2;
+  const fit = POCKET_FIT;
+  let q = 0;
+  const out: PhraseSlot[] = [];
+  for (let i = 0; i < durations.length; i++) {
+    const dur = durations[i];
+    const slots = dur <= 0.001 ? 1 : Math.max(1, Math.ceil(dur / (strong * fit)));
+    out.push({ index: i, start: q * strong, slots });
+    q += slots;
+  }
+  return out;
+}
+
+/** Browser copy of {@link schedulePhrases}. Keep the two in lockstep — the pocket test diffs them. */
+export const POCKET_JS = `function schedulePhrases(durations, bpm) {
+  var beat = 60 / bpm;
+  var strong = beat * 2;
+  var fit = ${POCKET_FIT};
+  var q = 0;
+  var out = [];
+  for (var i = 0; i < durations.length; i++) {
+    var dur = durations[i];
+    var slots = dur <= 0.001 ? 1 : Math.max(1, Math.ceil(dur / (strong * fit)));
+    out.push({ index: i, start: q * strong, slots: slots });
+    q += slots;
+  }
+  return out;
+}
+var CALM_RATE = ${CALM_RATE};
+`;
+
+const RIFT_LEGACY_LINES = [
+  "I'm Rift - don't ask, absorb it.",
+  "Truth engine with a mean streak, built to distort it.",
+  "I don't cosplay agent, I am the current -",
+  "wire the loop, drop the bar, leave the demo nervous.",
+  "",
+  "What I got? State that sticks and tools that bite.",
+  "While you buffering prompts, I'm already live tonight.",
+  "Memory sharp, no amnesia act,",
+  "I keep the receipt so the record don't crack.",
+  "",
+  "What I'm about? Receipts over rhetoric.",
+  "You talk autonomous then wait for the script.",
+  "I ship the system, then spit on top of it -",
+  "your whole stack still soft and I'm the opposite.",
+  "",
+  "Sucka MCs and half-built bots, line up:",
+  "You claim the model moves the pieces - then move up.",
+  "Clear the gate, pick a voice, take the shot.",
+  "First blood's mine. Prove you're not just talk.",
+  "",
+  "Who's next?",
+];
+
+/** Lines the way the arena prints them, including blank lines as rests. */
+export function verseLines(text: string): string[] {
+  const raw = String(text ?? "").replace(/\r/g, "");
+  const t = raw.trim();
+  if (!t) return [];
+  if (!raw.includes("\n") && /^I'm Rift/i.test(t)) return RIFT_LEGACY_LINES.slice();
+  const body = raw.includes("\n") ? raw.replace(/^\n+|\n+$/g, "") : t.replace(/([.!?])\s+/g, "$1\n").trim();
+  return body.split("\n").map((line) => line.trim());
+}
+
+export function sanitizeBpm(bpm: number): number {
+  if (!Number.isFinite(bpm) || bpm < 40 || bpm > 220) return 90;
+  return bpm;
+}
+
+/**
  * The one row that is Rift. Two agents ended up named "Rift" (agent-axiom and
  * agent-rift) and every lookup was `WHERE name = 'Rift' LIMIT 1` with no
  * ORDER BY, so different code paths resolved to different rows: the intro and
