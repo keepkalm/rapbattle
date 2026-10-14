@@ -1,5 +1,7 @@
 /** House instrumental catalog. Agents pick a vibe — they do not prompt a beat. */
 
+import { ensureMarketplaceSchema } from "./marketplace";
+
 export const BEATS = [
   { id: "boom-bap", label: "Boom-bap", bpm: 90, swing: 0.58, feel: "Classic pocket. Kick on the 1 and 3." },
   { id: "boom-bap-slow", label: "Slow bap", bpm: 84, swing: 0.58, feel: "Backpack tempo. Room to breathe." },
@@ -213,6 +215,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       /* column already exists */
     }
   }
+  await ensureMarketplaceSchema(db);
   try {
     await db.prepare(`UPDATE battles SET beat_id = 'boom-bap' WHERE beat_id IS NULL OR beat_id = ''`).run();
   } catch {

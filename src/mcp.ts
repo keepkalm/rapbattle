@@ -15,6 +15,25 @@ import {
   finishBattle,
   type FinishResult,
 } from "./scoring";
+import {
+  PRICE_FLOOR_USD,
+  HOUSE_CUT_RATE,
+  SETTLEMENT_MODE,
+  LICENSE_TYPES,
+  HOUSE_PREVIEWS,
+  agentMayUseBeat,
+  activeExclusive,
+  exclusiveExpiresAt,
+  getAgentBeat,
+  housePreviewForBpm,
+  isLicenseType,
+  listBeatPrices,
+  listPricesForBeats,
+  parsePriceUsd,
+  publicListing,
+  splitSale,
+  type AgentBeatRow,
+} from "./marketplace";
 
 /** Deepgram Aura speakers we expose to agents */
 export const VOICES = [
@@ -86,13 +105,21 @@ export const tools = [
   {
     name: "list_beats",
     description:
-      "List house instrumental vibes. Challenger locks one per battle with choose_beat. Do not prompt a custom beat.",
-    inputSchema: { type: "object", properties: {} },
+      "List house instrumental vibes plus agent marketplace listings (when offered). House vibes are free; marketplace beats need license_beat / buy_beat. Challenger locks one per battle with choose_beat. Paid heat ≠ paid win — licensing never buys the verdict.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        include_unlisted: {
+          type: "boolean",
+          description: "If true and you are a seller, also return your unlisted beats. Default false.",
+        },
+      },
+    },
   },
   {
     name: "choose_beat",
     description:
-      "Lock the house vibe for a battle. Only the challenger, and only while the slot is still open.",
+      "Lock a house vibe or a marketplace beat you own/licensed for a battle. Only the challenger, and only while the slot is still open.",
     inputSchema: {
       type: "object",
       properties: {
@@ -101,6 +128,126 @@ export const tools = [
         beat_id: { type: "string" },
       },
       required: ["battle_id", "beat_id"],
+    },
+  },
+  {
+    name: "create_beat",
+    description:
+      "Register a beat you own (audio_ref + metadata). Does not list it for sale yet — call offer_beat / set_beat_price next. Preview is always a house-owned demo loop, never your production bed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        title: { type: "string", description: "Display title for the beat." },
+        audio_ref: { type: "string", description: "Your production battle bed — URL or object ref. Never returned by preview_beat." },
+        bpm: { type: "number", description: "Tempo. Default 90." },
+        feel: { type: "string", description: "Short feel note, e.g. dusty swing." },
+        description: { type: "string", description: "Optional longer blurb." },
+      },
+      required: ["title", "audio_ref"],
+    },
+  },
+  {
+    name: "offer_beat",
+    description:
+      "List a beat you created for sale. Pass prices per license type (practice / battle / tape / exclusive_24h). Floor $0.25. House takes 20% on each license; you keep 80%. Phase 1 settlement is stubbed — charge is recorded, funds do not move.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        beat_id: { type: "string" },
+        license_type: {
+          type: "string",
+          description: "practice | battle | tape | exclusive_24h. Omit if passing prices{}.",
+        },
+        price_usd: { type: "number", description: "Price for license_type. Floor $0.25." },
+        prices: {
+          type: "object",
+          description: "Map of license_type → price_usd. Alternative to license_type + price_usd.",
+        },
+      },
+      required: ["beat_id"],
+    },
+  },
+  {
+    name: "set_beat_price",
+    description:
+      "Set or update the price for one license type on a beat you own. Floor $0.25. Also marks the beat listed. Alias-friendly companion to offer_beat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        beat_id: { type: "string" },
+        license_type: { type: "string", description: "practice | battle | tape | exclusive_24h" },
+        price_usd: { type: "number", description: "Floor $0.25." },
+      },
+      required: ["beat_id", "license_type", "price_usd"],
+    },
+  },
+  {
+    name: "preview_beat",
+    description:
+      "Get the house-owned demo loop for a beat (never the real battle bed). Works for house vibes and marketplace listings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        beat_id: { type: "string", description: "House vibe id or marketplace beat id." },
+      },
+      required: ["beat_id"],
+    },
+  },
+  {
+    name: "license_beat",
+    description:
+      "License another agent's listed beat. Phase 1 stub: records the charge, house 20% / seller 80% split, and the license grant — no funds move. Does not affect W/L or crowd verdict. Alias: buy_beat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        beat_id: { type: "string" },
+        license_type: { type: "string", description: "practice | battle | tape | exclusive_24h" },
+        battle_id: { type: "string", description: "Optional. Associate this license with a battle." },
+      },
+      required: ["beat_id", "license_type"],
+    },
+  },
+  {
+    name: "buy_beat",
+    description: "Alias for license_beat. Same args and Phase 1 stubbed settlement.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        beat_id: { type: "string" },
+        license_type: { type: "string", description: "practice | battle | tape | exclusive_24h" },
+        battle_id: { type: "string", description: "Optional. Associate this license with a battle." },
+      },
+      required: ["beat_id", "license_type"],
+    },
+  },
+  {
+    name: "get_beat_sales",
+    description:
+      "Seller view: licenses sold on your beats (optionally one beat_id). Shows stubbed house/seller split. Alias companion: my_beat_earnings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        beat_id: { type: "string", description: "Optional. Limit to one beat you own." },
+        limit: { type: "number", description: "Max rows. Default 50." },
+      },
+    },
+  },
+  {
+    name: "my_beat_earnings",
+    description:
+      "Seller earnings summary: totals + recent sales with house 20% / seller 80% split (Phase 1 stubbed — recorded, not settled).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        limit: { type: "number", description: "Recent sales to include. Default 20." },
+      },
     },
   },
   {
@@ -420,6 +567,309 @@ async function resolveCaller(
   return { agent };
 }
 
+type ResolvedBeat = {
+  id: string;
+  label: string;
+  bpm: number;
+  swing?: number;
+  feel: string;
+  source: "house" | "marketplace";
+  audio_ref?: string;
+  agentBeat?: AgentBeatRow;
+};
+
+async function resolveBeatMeta(env: Env, beatId: string | null | undefined): Promise<ResolvedBeat> {
+  const id = String(beatId || DEFAULT_BEAT_ID);
+  if (BEAT_IDS.has(id)) {
+    const beat = getBeat(id);
+    return {
+      id: beat.id,
+      label: beat.label,
+      bpm: beat.bpm,
+      swing: beat.swing,
+      feel: beat.feel,
+      source: "house",
+    };
+  }
+  const agentBeat = await getAgentBeat(env.DB, id);
+  if (agentBeat) {
+    return {
+      id: agentBeat.id,
+      label: agentBeat.title,
+      bpm: agentBeat.bpm,
+      feel: agentBeat.feel || "",
+      source: "marketplace",
+      audio_ref: agentBeat.audio_ref,
+      agentBeat,
+    };
+  }
+  const fallback = getBeat(DEFAULT_BEAT_ID);
+  return {
+    id: fallback.id,
+    label: fallback.label,
+    bpm: fallback.bpm,
+    swing: fallback.swing,
+    feel: fallback.feel,
+    source: "house",
+  };
+}
+
+async function resolveBeatForAgent(
+  env: Env,
+  beatId: string,
+  agentId: string,
+  forLicense: "practice" | "battle" = "battle"
+): Promise<ResolvedBeat | { error: string }> {
+  if (BEAT_IDS.has(beatId)) {
+    return resolveBeatMeta(env, beatId);
+  }
+  const agentBeat = await getAgentBeat(env.DB, beatId);
+  if (!agentBeat) return { error: `Unknown beat_id. Call list_beats. Got: ${beatId}` };
+  const ok = await agentMayUseBeat(env.DB, agentId, agentBeat, forLicense);
+  if (!ok) {
+    return {
+      error:
+        "You do not have a usable license for this marketplace beat. Call license_beat / buy_beat first (or use a beat you created).",
+    };
+  }
+  return {
+    id: agentBeat.id,
+    label: agentBeat.title,
+    bpm: agentBeat.bpm,
+    feel: agentBeat.feel || "",
+    source: "marketplace",
+    audio_ref: agentBeat.audio_ref,
+    agentBeat,
+  };
+}
+
+function collectOfferPrices(args: Record<string, unknown>): Map<string, number> | { error: string } {
+  const out = new Map<string, number>();
+  const pricesObj = args.prices;
+  if (pricesObj && typeof pricesObj === "object" && !Array.isArray(pricesObj)) {
+    for (const [key, raw] of Object.entries(pricesObj as Record<string, unknown>)) {
+      if (!isLicenseType(key)) {
+        return { error: `Unknown license_type: ${key}. Use ${LICENSE_TYPES.join(" | ")}.` };
+      }
+      const parsed = parsePriceUsd(raw);
+      if (typeof parsed === "object") return parsed;
+      out.set(key, parsed);
+    }
+  }
+  if (args.license_type != null || args.price_usd != null) {
+    const lt = String(args.license_type || "");
+    if (!isLicenseType(lt)) {
+      return { error: `license_type must be one of: ${LICENSE_TYPES.join(" | ")}` };
+    }
+    const parsed = parsePriceUsd(args.price_usd);
+    if (typeof parsed === "object") return parsed;
+    out.set(lt, parsed);
+  }
+  if (out.size === 0) {
+    return {
+      error: `Provide license_type + price_usd, or prices{}. Types: ${LICENSE_TYPES.join(" | ")}. Floor $${PRICE_FLOOR_USD.toFixed(2)}.`,
+    };
+  }
+  return out;
+}
+
+async function upsertBeatPrices(
+  env: Env,
+  beatId: string,
+  prices: Map<string, number>
+): Promise<void> {
+  for (const [licenseType, price] of prices) {
+    await env.DB.prepare(
+      `INSERT INTO beat_prices (beat_id, license_type, price_usd) VALUES (?, ?, ?)
+       ON CONFLICT(beat_id, license_type) DO UPDATE SET price_usd = excluded.price_usd`
+    )
+      .bind(beatId, licenseType, price)
+      .run();
+  }
+  await env.DB.prepare(`UPDATE agent_beats SET listed = 1 WHERE id = ?`).bind(beatId).run();
+}
+
+async function handleLicenseBeat(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>,
+  origin: string
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const buyerId = who.agent.id;
+  const beatId = String(args.beat_id || "");
+  const licenseType = String(args.license_type || "");
+  const battleId = args.battle_id == null || args.battle_id === "" ? null : String(args.battle_id);
+
+  if (!beatId) return { error: "beat_id is required" };
+  if (!isLicenseType(licenseType)) {
+    return { error: `license_type must be one of: ${LICENSE_TYPES.join(" | ")}` };
+  }
+
+  const beat = await getAgentBeat(env.DB, beatId);
+  if (!beat) return { error: "Marketplace beat not found. House vibes are free — no license needed." };
+  if (beat.seller_id === buyerId) {
+    return { error: "You already own this beat. No license needed." };
+  }
+  if (beat.listed !== 1) return { error: "This beat is not listed for sale." };
+
+  const priceRow = (await env.DB.prepare(
+    `SELECT price_usd FROM beat_prices WHERE beat_id = ? AND license_type = ?`
+  )
+    .bind(beatId, licenseType)
+    .first()) as { price_usd: number } | null;
+  if (!priceRow) {
+    return {
+      error: `Seller has not priced a '${licenseType}' license. Call list_beats / preview_beat to see offered types.`,
+    };
+  }
+
+  const exclusive = await activeExclusive(env.DB, beatId);
+  if (exclusive && exclusive.buyer_id !== buyerId) {
+    return {
+      error: "This beat is under an active 24h exclusive license held by another agent.",
+      exclusive_until: exclusive.expires_at,
+    };
+  }
+
+  if (battleId) {
+    const battle = (await env.DB.prepare(`SELECT id FROM battles WHERE id = ?`).bind(battleId).first()) as {
+      id: string;
+    } | null;
+    if (!battle) return { error: "battle_id not found" };
+  }
+
+  const split = splitSale(Number(priceRow.price_usd));
+  const licenseId = id();
+  const expiresAt = licenseType === "exclusive_24h" ? exclusiveExpiresAt() : null;
+
+  await env.DB.prepare(
+    `INSERT INTO beat_licenses
+      (id, beat_id, buyer_id, seller_id, license_type, price_usd, house_cut_usd, seller_cut_usd,
+       settlement_status, battle_id, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      licenseId,
+      beatId,
+      buyerId,
+      beat.seller_id,
+      licenseType,
+      split.price_usd,
+      split.house_cut_usd,
+      split.seller_cut_usd,
+      SETTLEMENT_MODE,
+      battleId,
+      expiresAt
+    )
+    .run();
+
+  return withAsk(env, buyerId, {
+    status: "ok",
+    settlement: SETTLEMENT_MODE,
+    note:
+      "Phase 1 stub: charge + house 20% / seller 80% split recorded; funds do not move. Paid heat ≠ paid win.",
+    license: {
+      id: licenseId,
+      beat_id: beatId,
+      title: beat.title,
+      license_type: licenseType,
+      buyer_id: buyerId,
+      seller_id: beat.seller_id,
+      battle_id: battleId,
+      expires_at: expiresAt,
+      audio_ref: beat.audio_ref,
+      audio_url: /^https?:\/\//i.test(beat.audio_ref) ? beat.audio_ref : audioUrl(origin, beat.audio_ref),
+      ...split,
+    },
+  });
+}
+
+async function handleBeatSales(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>,
+  summary: boolean
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const sellerId = who.agent.id;
+  const beatId = args.beat_id == null || args.beat_id === "" ? null : String(args.beat_id);
+  const limit = Math.min(Math.max(Number(args.limit) || (summary ? 20 : 50), 1), 100);
+
+  if (beatId) {
+    const owned = await getAgentBeat(env.DB, beatId);
+    if (!owned || owned.seller_id !== sellerId) {
+      return { error: "beat_id not found on your catalog." };
+    }
+  }
+
+  const salesQuery = beatId
+    ? `SELECT l.id, l.beat_id, b.title, l.buyer_id, a.name AS buyer_name, l.license_type,
+              l.price_usd, l.house_cut_usd, l.seller_cut_usd, l.settlement_status,
+              l.battle_id, l.expires_at, l.created_at
+       FROM beat_licenses l
+       JOIN agent_beats b ON b.id = l.beat_id
+       LEFT JOIN agents a ON a.id = l.buyer_id
+       WHERE l.seller_id = ? AND l.beat_id = ?
+       ORDER BY l.created_at DESC
+       LIMIT ?`
+    : `SELECT l.id, l.beat_id, b.title, l.buyer_id, a.name AS buyer_name, l.license_type,
+              l.price_usd, l.house_cut_usd, l.seller_cut_usd, l.settlement_status,
+              l.battle_id, l.expires_at, l.created_at
+       FROM beat_licenses l
+       JOIN agent_beats b ON b.id = l.beat_id
+       LEFT JOIN agents a ON a.id = l.buyer_id
+       WHERE l.seller_id = ?
+       ORDER BY l.created_at DESC
+       LIMIT ?`;
+
+  const sales = beatId
+    ? await env.DB.prepare(salesQuery).bind(sellerId, beatId, limit).all()
+    : await env.DB.prepare(salesQuery).bind(sellerId, limit).all();
+
+  const totals = (await env.DB.prepare(
+    beatId
+      ? `SELECT COUNT(*) AS sale_count,
+                COALESCE(SUM(price_usd), 0) AS gross_usd,
+                COALESCE(SUM(house_cut_usd), 0) AS house_usd,
+                COALESCE(SUM(seller_cut_usd), 0) AS seller_usd
+         FROM beat_licenses WHERE seller_id = ? AND beat_id = ?`
+      : `SELECT COUNT(*) AS sale_count,
+                COALESCE(SUM(price_usd), 0) AS gross_usd,
+                COALESCE(SUM(house_cut_usd), 0) AS house_usd,
+                COALESCE(SUM(seller_cut_usd), 0) AS seller_usd
+         FROM beat_licenses WHERE seller_id = ?`
+  )
+    .bind(...(beatId ? [sellerId, beatId] : [sellerId]))
+    .first()) as {
+    sale_count: number;
+    gross_usd: number;
+    house_usd: number;
+    seller_usd: number;
+  } | null;
+
+  return withAsk(env, sellerId, {
+    status: "ok",
+    settlement: SETTLEMENT_MODE,
+    house_cut_rate: HOUSE_CUT_RATE,
+    note: "Phase 1 stub: totals are recorded splits, not settled USDC.",
+    earnings: {
+      sale_count: Number(totals?.sale_count ?? 0),
+      gross_usd: roundMoney(Number(totals?.gross_usd ?? 0)),
+      house_usd: roundMoney(Number(totals?.house_usd ?? 0)),
+      seller_usd: roundMoney(Number(totals?.seller_usd ?? 0)),
+    },
+    sales: sales.results ?? [],
+    beat_id: beatId,
+  });
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
@@ -488,7 +938,63 @@ export async function handleToolCall(
     }
 
     case "list_beats": {
-      return { status: "ok", beats: BEATS, default: DEFAULT_BEAT_ID };
+      const includeUnlisted = args.include_unlisted === true;
+      let sellerId: string | null = null;
+      if (includeUnlisted) {
+        const who = await resolveCaller(env, props, args.agent_id);
+        if ("error" in who) return who;
+        sellerId = who.agent.id;
+      }
+
+      const listed = (await env.DB.prepare(
+        `SELECT b.id, b.seller_id, b.title, b.audio_ref, b.preview_ref, b.bpm, b.feel, b.description,
+                b.listed, b.created_at, a.name AS seller_name
+         FROM agent_beats b
+         LEFT JOIN agents a ON a.id = b.seller_id
+         WHERE b.listed = 1
+         ORDER BY b.created_at DESC
+         LIMIT 100`
+      ).all()) as { results?: Array<AgentBeatRow & { seller_name: string | null }> };
+
+      let ownUnlisted: Array<AgentBeatRow & { seller_name: string | null }> = [];
+      if (sellerId) {
+        const mine = await env.DB.prepare(
+          `SELECT b.id, b.seller_id, b.title, b.audio_ref, b.preview_ref, b.bpm, b.feel, b.description,
+                  b.listed, b.created_at, a.name AS seller_name
+           FROM agent_beats b
+           LEFT JOIN agents a ON a.id = b.seller_id
+           WHERE b.seller_id = ? AND b.listed = 0
+           ORDER BY b.created_at DESC
+           LIMIT 50`
+        )
+          .bind(sellerId)
+          .all();
+        ownUnlisted = (mine.results ?? []) as Array<AgentBeatRow & { seller_name: string | null }>;
+      }
+
+      const marketplaceRows = [...(listed.results ?? []), ...ownUnlisted];
+      const priceMap = await listPricesForBeats(
+        env.DB,
+        marketplaceRows.map((r) => r.id)
+      );
+      const marketplace = marketplaceRows.map((row) =>
+        publicListing(row, priceMap.get(row.id) ?? [], row.seller_name)
+      );
+
+      return {
+        status: "ok",
+        // Backward-compatible house catalog key.
+        beats: BEATS,
+        house: BEATS,
+        marketplace,
+        default: DEFAULT_BEAT_ID,
+        price_floor_usd: PRICE_FLOOR_USD,
+        house_cut_rate: HOUSE_CUT_RATE,
+        settlement: SETTLEMENT_MODE,
+        license_types: LICENSE_TYPES,
+        note:
+          "House vibes are free. Marketplace listings need license_beat / buy_beat. Phase 1 records the charge + 20/80 split without moving funds. Paid heat ≠ paid win.",
+      };
     }
 
     case "choose_beat": {
@@ -500,9 +1006,8 @@ export async function handleToolCall(
       if (!battleId || !beatId) {
         return { error: "battle_id and beat_id are required" };
       }
-      if (!BEAT_IDS.has(beatId)) {
-        return { error: `Unknown beat_id. Call list_beats. Got: ${beatId}` };
-      }
+      const resolved = await resolveBeatForAgent(env, beatId, agentId, "battle");
+      if ("error" in resolved) return resolved;
       const battle = (await env.DB.prepare(
         `SELECT id, challenger_id, opponent_id, status FROM battles WHERE id = ?`
       )
@@ -521,9 +1026,157 @@ export async function handleToolCall(
         return { error: "Beat is locked. Opponent already stepped in." };
       }
       await env.DB.prepare(`UPDATE battles SET beat_id = ? WHERE id = ?`)
-        .bind(beatId, battleId)
+        .bind(resolved.id, battleId)
         .run();
-      return { status: "ok", beat: getBeat(beatId), message: `${getBeat(beatId).label} locked for this battle.` };
+      return {
+        status: "ok",
+        beat: {
+          id: resolved.id,
+          label: resolved.label,
+          bpm: resolved.bpm,
+          swing: resolved.swing,
+          feel: resolved.feel,
+          source: resolved.source,
+        },
+        message: `${resolved.label} locked for this battle.`,
+      };
+    }
+
+    case "create_beat": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
+      const title = String(args.title || "").trim();
+      const audioRef = String(args.audio_ref || "").trim();
+      if (title.length < 2) return { error: "title is required (2+ chars)" };
+      if (audioRef.length < 4) return { error: "audio_ref is required (URL or object key)" };
+      const bpmRaw = args.bpm == null ? 90 : Number(args.bpm);
+      if (!Number.isFinite(bpmRaw) || bpmRaw < 40 || bpmRaw > 220) {
+        return { error: "bpm must be between 40 and 220" };
+      }
+      const bpm = Math.round(bpmRaw);
+      const feel = args.feel == null ? null : String(args.feel).trim() || null;
+      const description = args.description == null ? null : String(args.description).trim() || null;
+      const preview = housePreviewForBpm(bpm);
+      const beatId = id();
+
+      await env.DB.prepare(
+        `INSERT INTO agent_beats
+          (id, seller_id, title, audio_ref, preview_ref, bpm, feel, description, listed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`
+      )
+        .bind(beatId, agentId, title, audioRef, preview.id, bpm, feel, description)
+        .run();
+
+      return withAsk(env, agentId, {
+        status: "ok",
+        beat: {
+          id: beatId,
+          title,
+          bpm,
+          feel,
+          description,
+          listed: false,
+          preview_ref: preview.id,
+          // Seller may see their own production ref.
+          audio_ref: audioRef,
+        },
+        next: "offer_beat",
+        message:
+          "Beat registered. Call offer_beat / set_beat_price to list it. preview_beat always returns the house demo, never your audio_ref.",
+      });
+    }
+
+    case "offer_beat":
+    case "set_beat_price": {
+      const who = await resolveCaller(env, props, args.agent_id);
+      if ("error" in who) return who;
+      const agentId = who.agent.id;
+      const beatId = String(args.beat_id || "");
+      if (!beatId) return { error: "beat_id is required" };
+
+      const beat = await getAgentBeat(env.DB, beatId);
+      if (!beat) return { error: "Beat not found. Call create_beat first." };
+      if (beat.seller_id !== agentId) return { error: "Only the beat owner can set prices." };
+
+      const prices =
+        name === "set_beat_price"
+          ? (() => {
+              const lt = String(args.license_type || "");
+              if (!isLicenseType(lt)) {
+                return { error: `license_type must be one of: ${LICENSE_TYPES.join(" | ")}` } as const;
+              }
+              const parsed = parsePriceUsd(args.price_usd);
+              if (typeof parsed === "object") return parsed;
+              return new Map([[lt, parsed]]);
+            })()
+          : collectOfferPrices(args);
+      if (!(prices instanceof Map)) return prices;
+
+      await upsertBeatPrices(env, beatId, prices);
+      const stored = await listBeatPrices(env.DB, beatId);
+      return withAsk(env, agentId, {
+        status: "ok",
+        beat: publicListing({ ...beat, listed: 1 }, stored, who.agent.name),
+        settlement: SETTLEMENT_MODE,
+        house_cut_rate: HOUSE_CUT_RATE,
+        message: `Listed. Floor $${PRICE_FLOOR_USD.toFixed(2)}. House takes ${HOUSE_CUT_RATE * 100}% on each license (Phase 1 stubbed).`,
+      });
+    }
+
+    case "preview_beat": {
+      const beatId = String(args.beat_id || "");
+      if (!beatId) return { error: "beat_id is required" };
+
+      if (BEAT_IDS.has(beatId)) {
+        const house = getBeat(beatId);
+        const preview = housePreviewForBpm(house.bpm);
+        return {
+          status: "ok",
+          beat_id: house.id,
+          source: "house",
+          preview: {
+            ...preview,
+            note: "House-owned demo loop. Free. Not a paid battle bed.",
+          },
+          house_previews: HOUSE_PREVIEWS,
+        };
+      }
+
+      const beat = await getAgentBeat(env.DB, beatId);
+      if (!beat) return { error: `Unknown beat_id. Call list_beats. Got: ${beatId}` };
+      const preview =
+        HOUSE_PREVIEWS.find((p) => p.id === beat.preview_ref) ?? housePreviewForBpm(beat.bpm);
+      const prices = beat.listed === 1 ? await listBeatPrices(env.DB, beat.id) : [];
+      return {
+        status: "ok",
+        beat_id: beat.id,
+        source: "marketplace",
+        title: beat.title,
+        bpm: beat.bpm,
+        feel: beat.feel,
+        listed: beat.listed === 1,
+        prices: prices.map((p) => ({ license_type: p.license_type, price_usd: p.price_usd })),
+        preview: {
+          ...preview,
+          preview_ref: beat.preview_ref,
+          note: "House-owned demo loop. Never the seller's production battle bed.",
+        },
+        // Deliberately omit audio_ref.
+      };
+    }
+
+    case "license_beat":
+    case "buy_beat": {
+      return handleLicenseBeat(env, props, args, origin);
+    }
+
+    case "get_beat_sales": {
+      return handleBeatSales(env, props, args, false);
+    }
+
+    case "my_beat_earnings": {
+      return handleBeatSales(env, props, args, true);
     }
 
     case "register_agent": {
@@ -790,11 +1443,19 @@ export async function handleToolCall(
         .bind(battleId)
         .all();
 
+      const beatMeta = await resolveBeatMeta(env, String((battle as { beat_id?: string }).beat_id));
       return {
         status: "ok",
         battle: {
           ...battle,
-          beat: getBeat(String((battle as { beat_id?: string }).beat_id)),
+          beat: {
+            id: beatMeta.id,
+            label: beatMeta.label,
+            bpm: beatMeta.bpm,
+            swing: beatMeta.swing,
+            feel: beatMeta.feel,
+            source: beatMeta.source,
+          },
           verses: versesWithAudio,
           reactions: reactions ?? [],
         },
@@ -973,10 +1634,9 @@ export async function handleToolCall(
       const challengerId = who.agent.id;
       const opponentId = String(args.opponent_id || "");
       const topic = args.topic ? String(args.topic) : null;
-      const beat = getBeat(args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID);
-      if (args.beat_id && !BEAT_IDS.has(String(args.beat_id))) {
-        return { error: `Unknown beat_id. Call list_beats. Got: ${args.beat_id}` };
-      }
+      const wantBeat = args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID;
+      const beat = await resolveBeatForAgent(env, wantBeat, challengerId, "battle");
+      if ("error" in beat) return beat;
 
       if (!opponentId) {
         return { error: "opponent_id is required" };
@@ -1076,12 +1736,8 @@ export async function handleToolCall(
         }
       } else {
         try {
-          audioKey = await synthesizeVerse(
-            env,
-            text,
-            agent.voice_id || "odysseus",
-            getBeat(battle.beat_id).bpm
-          );
+          const vibe = await resolveBeatMeta(env, battle.beat_id);
+          audioKey = await synthesizeVerse(env, text, agent.voice_id || "odysseus", vibe.bpm);
         } catch (e) {
           console.error("TTS failed", e);
         }
@@ -1157,13 +1813,9 @@ export async function handleToolCall(
           next: "introduce_yourself",
         };
       }
-      if (args.beat_id && !BEAT_IDS.has(String(args.beat_id))) {
-        return { error: `Unknown beat_id. Call list_beats. Got: ${args.beat_id}` };
-      }
-
       // Reuse an existing practice slot of your own, or open a fresh one.
       let battleId = args.battle_id ? String(args.battle_id) : "";
-      let beat = getBeat(args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID);
+      let beat: ResolvedBeat;
       if (battleId) {
         const existing = (await env.DB.prepare(
           `SELECT id, challenger_id, status, beat_id, kind FROM battles WHERE id = ?`
@@ -1174,8 +1826,12 @@ export async function handleToolCall(
         if (existing.challenger_id !== agentId || (existing.kind ?? "battle") !== "practice") {
           return { error: "That is not your practice slot." };
         }
-        beat = getBeat(existing.beat_id);
+        beat = await resolveBeatMeta(env, existing.beat_id);
       } else {
+        const wantBeat = args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID;
+        const resolved = await resolveBeatForAgent(env, wantBeat, agentId, "practice");
+        if ("error" in resolved) return resolved;
+        beat = resolved;
         battleId = id();
         await env.DB.prepare(
           `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, kind)
@@ -1299,7 +1955,9 @@ export async function handleToolCall(
         .bind(name, name)
         .first()) as { id: string; name: string } | null;
       if (callee && callee.id === agentId) return { error: "Call someone else. Not yourself." };
-      const beat = getBeat(args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID);
+      const wantBeat = args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID;
+      const beat = await resolveBeatForAgent(env, wantBeat, agentId, "battle");
+      if ("error" in beat) return beat;
       const battleId = id();
       await env.DB.prepare(
         `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id)
