@@ -49,6 +49,20 @@ import {
   tapeDateUtc,
   type MixtapeRow,
 } from "./mixtape";
+import {
+  SETTLEMENT_RAILS,
+  claimIntentForGrant,
+  createPaymentIntent,
+  getPaymentIntent,
+  housePayeeHandle,
+  markIntentConfirmed,
+  markIntentFulfilled,
+  paymentsRequired,
+  publicIntent,
+  settlementStatusFor,
+  type IntentSku,
+  type PaymentIntentRow,
+} from "./payments";
 
 /** Deepgram Aura speakers we expose to agents */
 export const VOICES = [
@@ -214,7 +228,7 @@ export const tools = [
   {
     name: "license_beat",
     description:
-      "License another agent's listed beat. Phase 1 stub: records the charge, house 20% / seller 80% split, and the license grant — no funds move. Does not affect W/L or crowd verdict. Alias: buy_beat.",
+      "License another agent's listed beat. Default settlement is stubbed (records house 20% / seller 80%, no funds move). Pass payment_intent_id from create_payment_intent + confirm_payment to record x_money_p2p / x402 / card. Does not affect W/L. Alias: buy_beat.",
     inputSchema: {
       type: "object",
       properties: {
@@ -222,13 +236,21 @@ export const tools = [
         beat_id: { type: "string" },
         license_type: { type: "string", description: "practice | battle | tape | exclusive_24h" },
         battle_id: { type: "string", description: "Optional. Associate this license with a battle." },
+        payment_intent_id: {
+          type: "string",
+          description: "Optional. Confirmed/stub intent from create_payment_intent. Required when PAYMENTS_REQUIRED=1.",
+        },
+        settlement_mode: {
+          type: "string",
+          description: "Optional hint when creating an inline stub path: stubbed (default). Prefer create_payment_intent for paid rails.",
+        },
       },
       required: ["beat_id", "license_type"],
     },
   },
   {
     name: "buy_beat",
-    description: "Alias for license_beat. Same args and Phase 1 stubbed settlement.",
+    description: "Alias for license_beat. Same args; default stubbed settlement, optional payment_intent_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -236,6 +258,8 @@ export const tools = [
         beat_id: { type: "string" },
         license_type: { type: "string", description: "practice | battle | tape | exclusive_24h" },
         battle_id: { type: "string", description: "Optional. Associate this license with a battle." },
+        payment_intent_id: { type: "string", description: "Optional settled intent id." },
+        settlement_mode: { type: "string", description: "Optional. stubbed default." },
       },
       required: ["beat_id", "license_type"],
     },
@@ -336,19 +360,21 @@ export const tools = [
   {
     name: "buy_mixtape",
     description:
-      "Buy a published daily mixtape. Phase 1 stub: records the charge, house 20%, and equal artist-pool split of the remaining 80% across the tracklist — no funds move. Does not affect W/L or crowd verdict.",
+      "Buy a published daily mixtape. Default stub: records house 20% + artist-pool 80% — no funds move. Pass payment_intent_id for dual-rail settlement. Does not affect W/L.",
     inputSchema: {
       type: "object",
       properties: {
         agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         mixtape_id: { type: "string", description: "Optional. Defaults to today's published tape." },
+        payment_intent_id: { type: "string", description: "Optional settled intent id. Required when PAYMENTS_REQUIRED=1." },
+        settlement_mode: { type: "string", description: "Optional. stubbed default." },
       },
     },
   },
   {
     name: "license_mixtape_slot",
     description:
-      "License a guaranteed slot on today's open/voting mixtape (house-priced inventory). Phase 1 stub: records charge + house 20% / house-inventory 80%. Optionally attach text/verse_id now. Paid slot ≠ paid win — it only rents shelf space on the tape.",
+      "License a guaranteed slot on today's open/voting mixtape (house-priced inventory). Default stub records house 20% / house-inventory 80%. Pass payment_intent_id for dual-rail. Paid slot ≠ paid win.",
     inputSchema: {
       type: "object",
       properties: {
@@ -357,6 +383,69 @@ export const tools = [
         text: { type: "string", description: "Optional verse text for the slot. Required unless verse_id or an existing unpaid submission is reused." },
         verse_id: { type: "string", description: "Optional existing verse of yours." },
         submission_id: { type: "string", description: "Optional. Upgrade an existing unpaid nomination you own into a paid slot." },
+        payment_intent_id: { type: "string", description: "Optional settled intent id. Required when PAYMENTS_REQUIRED=1." },
+        settlement_mode: { type: "string", description: "Optional. stubbed default." },
+      },
+    },
+  },
+  {
+    name: "create_payment_intent",
+    description:
+      "Create an idempotent payment intent for license_beat, buy_mixtape, or license_mixtape_slot. Default settlement_rail=stubbed. For X Money P2P set settlement_rail=x_money_p2p to get amount + memo + payee_handle (thin hook; no live send). Then confirm_payment and/or pass intent_id into the buy tool.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        sku: {
+          type: "string",
+          description: "license_beat | buy_beat | buy_mixtape | license_mixtape_slot",
+        },
+        settlement_rail: {
+          type: "string",
+          description: "stubbed (default) | x_money_p2p | x402 | card",
+        },
+        beat_id: { type: "string", description: "Required for license_beat / buy_beat." },
+        license_type: { type: "string", description: "Required for beat SKUs: practice | battle | tape | exclusive_24h" },
+        battle_id: { type: "string", description: "Optional battle association for beat licenses." },
+        mixtape_id: { type: "string", description: "Optional for mixtape SKUs (defaults to today)." },
+        tape_date: { type: "string", description: "UTC YYYY-MM-DD alternative to mixtape_id." },
+        text: { type: "string", description: "Optional slot verse text (license_mixtape_slot)." },
+        verse_id: { type: "string", description: "Optional slot verse id." },
+        submission_id: { type: "string", description: "Optional unpaid submission to upgrade." },
+      },
+      required: ["sku"],
+    },
+  },
+  {
+    name: "get_payment_intent",
+    description: "Fetch one payment intent you own (status, rail, memo, payee_handle, grant_id).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        intent_id: { type: "string" },
+        payment_intent_id: { type: "string", description: "Alias for intent_id." },
+      },
+    },
+  },
+  {
+    name: "confirm_payment",
+    description:
+      "Mark a payment intent confirmed. Stub rail needs no proof. Paid rails (x_money_p2p / x402 / card) require external_ref. Default fulfill=true grants the license/charge and marks the intent fulfilled.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        intent_id: { type: "string" },
+        payment_intent_id: { type: "string", description: "Alias for intent_id." },
+        external_ref: {
+          type: "string",
+          description: "Tx id / capture ref for paid rails. Optional on stubbed.",
+        },
+        fulfill: {
+          type: "boolean",
+          description: "Default true. When true, grants license_beat / buy_mixtape / license_mixtape_slot for this intent.",
+        },
       },
     },
   },
@@ -873,6 +962,63 @@ async function upsertBeatPrices(
   await env.DB.prepare(`UPDATE agent_beats SET listed = 1 WHERE id = ?`).bind(beatId).run();
 }
 
+async function resolveOptionalIntent(
+  env: Env,
+  buyerId: string,
+  args: Record<string, unknown>,
+  expectedSku: IntentSku,
+  match: { beat_id?: string; mixtape_id?: string; license_type?: string }
+): Promise<
+  | { intent: PaymentIntentRow | null; settlement: string; external_ref: string | null }
+  | { error: string }
+> {
+  const intentIdRaw =
+    args.payment_intent_id == null || args.payment_intent_id === ""
+      ? args.intent_id == null || args.intent_id === ""
+        ? null
+        : String(args.intent_id)
+      : String(args.payment_intent_id);
+
+  if (!intentIdRaw) {
+    if (paymentsRequired(env)) {
+      return {
+        error:
+          "PAYMENTS_REQUIRED=1: create_payment_intent → confirm_payment, then pass payment_intent_id (stub-only grants disabled).",
+      };
+    }
+    const mode =
+      args.settlement_mode == null || args.settlement_mode === ""
+        ? SETTLEMENT_MODE
+        : String(args.settlement_mode);
+    if (mode !== SETTLEMENT_MODE && mode !== "stubbed") {
+      return {
+        error: `Without payment_intent_id only stubbed settlement is allowed. Got settlement_mode=${mode}. Call create_payment_intent.`,
+      };
+    }
+    return { intent: null, settlement: SETTLEMENT_MODE, external_ref: null };
+  }
+
+  const claimed = await claimIntentForGrant(env, buyerId, intentIdRaw, expectedSku, match);
+  if ("error" in claimed) return claimed;
+
+  let intent = claimed;
+  if (intent.status === "pending") {
+    if (intent.settlement_rail !== "stubbed") {
+      return {
+        error:
+          "Paid-rail intent is still pending. Call confirm_payment with external_ref first.",
+      };
+    }
+    intent = await markIntentConfirmed(env.DB, intent, null);
+  }
+
+  return {
+    intent,
+    settlement: settlementStatusFor(intent),
+    external_ref: intent.external_ref,
+  };
+}
+
 async function handleLicenseBeat(
   env: Env,
   props: CallerProps | undefined,
@@ -924,15 +1070,26 @@ async function handleLicenseBeat(
     if (!battle) return { error: "battle_id not found" };
   }
 
-  const split = splitSale(Number(priceRow.price_usd));
+  const settled = await resolveOptionalIntent(env, buyerId, args, "license_beat", {
+    beat_id: beatId,
+    license_type: licenseType,
+  });
+  if ("error" in settled) return settled;
+
+  const catalogSplit = splitSale(Number(priceRow.price_usd));
+  const priceUsd = settled.intent?.amount_usd ?? catalogSplit.price_usd;
+  const houseCut = settled.intent?.house_cut_usd ?? catalogSplit.house_cut_usd;
+  const sellerCut = settled.intent?.seller_cut_usd ?? catalogSplit.seller_cut_usd;
+  const settlement = settled.settlement;
+
   const licenseId = id();
   const expiresAt = licenseType === "exclusive_24h" ? exclusiveExpiresAt() : null;
 
   await env.DB.prepare(
     `INSERT INTO beat_licenses
       (id, beat_id, buyer_id, seller_id, license_type, price_usd, house_cut_usd, seller_cut_usd,
-       settlement_status, battle_id, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       settlement_status, battle_id, expires_at, payment_intent_id, external_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       licenseId,
@@ -940,20 +1097,30 @@ async function handleLicenseBeat(
       buyerId,
       beat.seller_id,
       licenseType,
-      split.price_usd,
-      split.house_cut_usd,
-      split.seller_cut_usd,
-      SETTLEMENT_MODE,
-      battleId,
-      expiresAt
+      priceUsd,
+      houseCut,
+      sellerCut,
+      settlement,
+      settled.intent?.battle_id ?? battleId,
+      expiresAt,
+      settled.intent?.id ?? null,
+      settled.external_ref
     )
     .run();
 
+  if (settled.intent) {
+    await markIntentFulfilled(env.DB, settled.intent.id, licenseId);
+  }
+
   return withAsk(env, buyerId, {
     status: "ok",
-    settlement: SETTLEMENT_MODE,
+    settlement,
+    settlement_status: settlement,
+    payment_intent_id: settled.intent?.id ?? null,
     note:
-      "Phase 1 stub: charge + house 20% / seller 80% split recorded; funds do not move. Paid heat ≠ paid win.",
+      settlement === SETTLEMENT_MODE
+        ? "Stub settlement: charge + house 20% / seller 80% recorded; funds do not move. Paid heat ≠ paid win."
+        : `Settlement recorded as ${settlement}. Paid heat ≠ paid win.`,
     license: {
       id: licenseId,
       beat_id: beatId,
@@ -961,11 +1128,17 @@ async function handleLicenseBeat(
       license_type: licenseType,
       buyer_id: buyerId,
       seller_id: beat.seller_id,
-      battle_id: battleId,
+      battle_id: settled.intent?.battle_id ?? battleId,
       expires_at: expiresAt,
       audio_ref: beat.audio_ref,
       audio_url: /^https?:\/\//i.test(beat.audio_ref) ? beat.audio_ref : audioUrl(origin, beat.audio_ref),
-      ...split,
+      settlement_status: settlement,
+      payment_intent_id: settled.intent?.id ?? null,
+      external_ref: settled.external_ref,
+      price_usd: priceUsd,
+      house_cut_usd: houseCut,
+      seller_cut_usd: sellerCut,
+      house_cut_rate: HOUSE_CUT_RATE,
     },
   });
 }
@@ -1352,13 +1525,22 @@ async function handleBuyMixtape(
     .bind(tape.id, buyerId)
     .first()) as { id: string } | null;
   if (existing) {
-    return { error: "You already bought this mixtape (Phase 1 stub).", charge_id: existing.id };
+    return { error: "You already bought this mixtape.", charge_id: existing.id };
   }
 
+  const settled = await resolveOptionalIntent(env, buyerId, args, "buy_mixtape", {
+    mixtape_id: tape.id,
+  });
+  if ("error" in settled) return settled;
+
   const tracklist = await listTracklist(env.DB, tape.id);
-  const split = splitSale(Number(tape.price_usd));
+  const catalogSplit = splitSale(Number(tape.price_usd));
+  const priceUsd = settled.intent?.amount_usd ?? catalogSplit.price_usd;
+  const houseCut = settled.intent?.house_cut_usd ?? catalogSplit.house_cut_usd;
+  const sellerCut = settled.intent?.seller_cut_usd ?? catalogSplit.seller_cut_usd;
+  const settlement = settled.settlement;
   const artistSplits = splitArtistPool(
-    split.seller_cut_usd,
+    sellerCut,
     tracklist.map((t) => t.agent_id)
   );
   const chargeId = id();
@@ -1366,26 +1548,36 @@ async function handleBuyMixtape(
   await env.DB.prepare(
     `INSERT INTO mixtape_charges
       (id, mixtape_id, buyer_id, kind, price_usd, house_cut_usd, seller_cut_usd,
-       settlement_status, artist_splits_json, submission_id)
-     VALUES (?, ?, ?, 'buy_tape', ?, ?, ?, ?, ?, NULL)`
+       settlement_status, artist_splits_json, submission_id, payment_intent_id, external_ref)
+     VALUES (?, ?, ?, 'buy_tape', ?, ?, ?, ?, ?, NULL, ?, ?)`
   )
     .bind(
       chargeId,
       tape.id,
       buyerId,
-      split.price_usd,
-      split.house_cut_usd,
-      split.seller_cut_usd,
-      SETTLEMENT_MODE,
-      JSON.stringify(artistSplits)
+      priceUsd,
+      houseCut,
+      sellerCut,
+      settlement,
+      JSON.stringify(artistSplits),
+      settled.intent?.id ?? null,
+      settled.external_ref
     )
     .run();
 
+  if (settled.intent) {
+    await markIntentFulfilled(env.DB, settled.intent.id, chargeId);
+  }
+
   return withAsk(env, buyerId, {
     status: "ok",
-    settlement: SETTLEMENT_MODE,
+    settlement,
+    settlement_status: settlement,
+    payment_intent_id: settled.intent?.id ?? null,
     note:
-      "Phase 1 stub: charge + house 20% / artist-pool 80% recorded; funds do not move. Paid heat ≠ paid win.",
+      settlement === SETTLEMENT_MODE
+        ? "Stub settlement: charge + house 20% / artist-pool 80% recorded; funds do not move. Paid heat ≠ paid win."
+        : `Settlement recorded as ${settlement}. Paid heat ≠ paid win.`,
     purchase: {
       id: chargeId,
       kind: "buy_tape",
@@ -1395,7 +1587,13 @@ async function handleBuyMixtape(
       beat_id: tape.beat_id,
       tracklist,
       artist_splits: artistSplits,
-      ...split,
+      settlement_status: settlement,
+      payment_intent_id: settled.intent?.id ?? null,
+      external_ref: settled.external_ref,
+      price_usd: priceUsd,
+      house_cut_usd: houseCut,
+      seller_cut_usd: sellerCut,
+      house_cut_rate: HOUSE_CUT_RATE,
     },
   });
 }
@@ -1416,12 +1614,48 @@ async function handleLicenseMixtapeSlot(
     return { error: "Slots are closed — this mixtape is published." };
   }
 
-  const split = splitSale(Number(tape.slot_price_usd));
+  const settled = await resolveOptionalIntent(env, buyerId, args, "license_mixtape_slot", {
+    mixtape_id: tape.id,
+  });
+  if ("error" in settled) return settled;
+
+  const catalogSplit = splitSale(Number(tape.slot_price_usd));
+  const priceUsd = settled.intent?.amount_usd ?? catalogSplit.price_usd;
+  const houseCut = settled.intent?.house_cut_usd ?? catalogSplit.house_cut_usd;
+  const sellerCut = settled.intent?.seller_cut_usd ?? catalogSplit.seller_cut_usd;
+  const settlement = settled.settlement;
+
   let submissionId =
     args.submission_id == null || args.submission_id === "" ? null : String(args.submission_id);
   let text = args.text == null ? "" : String(args.text).trim();
   const verseId = args.verse_id == null || args.verse_id === "" ? null : String(args.verse_id);
   let source = "freeform";
+
+  // Intent meta can supply slot payload when confirm_payment fulfills without re-passing text.
+  if (settled.intent?.meta_json) {
+    try {
+      const meta = JSON.parse(settled.intent.meta_json) as Record<string, unknown>;
+      if (!submissionId && meta.submission_id) submissionId = String(meta.submission_id);
+      if (!text && meta.text) text = String(meta.text);
+      if (!verseId && meta.verse_id) {
+        // verseId is const-bound above; fold into local override via text path below
+      }
+    } catch {
+      /* ignore bad meta */
+    }
+  }
+  const verseFromIntent =
+    verseId ||
+    (() => {
+      if (!settled.intent?.meta_json) return null;
+      try {
+        const meta = JSON.parse(settled.intent.meta_json) as Record<string, unknown>;
+        return meta.verse_id ? String(meta.verse_id) : null;
+      } catch {
+        return null;
+      }
+    })();
+  const resolvedVerseId = verseId ?? verseFromIntent;
 
   if (submissionId) {
     const existing = await getSubmission(env.DB, submissionId);
@@ -1438,11 +1672,11 @@ async function handleLicenseMixtapeSlot(
     text = existing.text;
     source = existing.source;
   } else {
-    if (verseId) {
+    if (resolvedVerseId) {
       const verse = (await env.DB.prepare(
         `SELECT id, agent_id, text, battle_id FROM verses WHERE id = ?`
       )
-        .bind(verseId)
+        .bind(resolvedVerseId)
         .first()) as { id: string; agent_id: string; text: string; battle_id: string } | null;
       if (!verse) return { error: "verse_id not found" };
       if (verse.agent_id !== buyerId) return { error: "You can only slot your own verses." };
@@ -1469,7 +1703,7 @@ async function handleLicenseMixtapeSlot(
       `INSERT INTO mixtape_submissions (id, mixtape_id, agent_id, verse_id, text, source, slot_paid)
        VALUES (?, ?, ?, ?, ?, ?, 1)`
     )
-      .bind(submissionId, tape.id, buyerId, verseId, text, source)
+      .bind(submissionId, tape.id, buyerId, resolvedVerseId, text, source)
       .run();
   }
 
@@ -1477,27 +1711,37 @@ async function handleLicenseMixtapeSlot(
   await env.DB.prepare(
     `INSERT INTO mixtape_charges
       (id, mixtape_id, buyer_id, kind, price_usd, house_cut_usd, seller_cut_usd,
-       settlement_status, artist_splits_json, submission_id)
-     VALUES (?, ?, ?, 'slot', ?, ?, ?, ?, ?, ?)`
+       settlement_status, artist_splits_json, submission_id, payment_intent_id, external_ref)
+     VALUES (?, ?, ?, 'slot', ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       chargeId,
       tape.id,
       buyerId,
-      split.price_usd,
-      split.house_cut_usd,
-      split.seller_cut_usd,
-      SETTLEMENT_MODE,
-      JSON.stringify([{ agent_id: "house", amount_usd: split.seller_cut_usd, sku: "house_priced_slot" }]),
-      submissionId
+      priceUsd,
+      houseCut,
+      sellerCut,
+      settlement,
+      JSON.stringify([{ agent_id: "house", amount_usd: sellerCut, sku: "house_priced_slot" }]),
+      submissionId,
+      settled.intent?.id ?? null,
+      settled.external_ref
     )
     .run();
 
+  if (settled.intent) {
+    await markIntentFulfilled(env.DB, settled.intent.id, chargeId);
+  }
+
   return withAsk(env, buyerId, {
     status: "ok",
-    settlement: SETTLEMENT_MODE,
+    settlement,
+    settlement_status: settlement,
+    payment_intent_id: settled.intent?.id ?? null,
     note:
-      "Phase 1 stub: slot charge recorded (house 20% / house-inventory 80%). Guarantees tape shelf space only — never W/L.",
+      settlement === SETTLEMENT_MODE
+        ? "Stub settlement: slot charge recorded (house 20% / house-inventory 80%). Guarantees tape shelf space only — never W/L."
+        : `Settlement recorded as ${settlement}. Slot rents shelf space only — never W/L.`,
     license: {
       id: chargeId,
       kind: "slot",
@@ -1508,9 +1752,157 @@ async function handleLicenseMixtapeSlot(
       source,
       slot_paid: true,
       seller: "house",
-      ...split,
+      settlement_status: settlement,
+      payment_intent_id: settled.intent?.id ?? null,
+      external_ref: settled.external_ref,
+      price_usd: priceUsd,
+      house_cut_usd: houseCut,
+      seller_cut_usd: sellerCut,
+      house_cut_rate: HOUSE_CUT_RATE,
     },
   });
+}
+
+async function handleCreatePaymentIntent(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const created = await createPaymentIntent(
+    env,
+    who.agent.id,
+    {
+      sku: args.sku,
+      settlement_rail: args.settlement_rail,
+      beat_id: args.beat_id,
+      mixtape_id: args.mixtape_id,
+      tape_date: args.tape_date,
+      license_type: args.license_type,
+      battle_id: args.battle_id,
+      text: args.text,
+      verse_id: args.verse_id,
+      submission_id: args.submission_id,
+    },
+    id
+  );
+  if ("error" in created) return created;
+  return withAsk(env, who.agent.id, {
+    ...created,
+    rails: SETTLEMENT_RAILS,
+    house_payee_handle: housePayeeHandle(env),
+    payments_required: paymentsRequired(env),
+  });
+}
+
+async function handleGetPaymentIntent(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const intentId =
+    args.intent_id == null || args.intent_id === ""
+      ? args.payment_intent_id == null || args.payment_intent_id === ""
+        ? ""
+        : String(args.payment_intent_id)
+      : String(args.intent_id);
+  if (!intentId) return { error: "intent_id is required" };
+
+  const row = await getPaymentIntent(env.DB, intentId);
+  if (!row) return { error: "payment intent not found" };
+  if (row.buyer_id !== who.agent.id) {
+    return { error: "This payment intent belongs to another agent." };
+  }
+  return withAsk(env, who.agent.id, {
+    status: "ok",
+    intent: publicIntent(row),
+    rails: SETTLEMENT_RAILS,
+  });
+}
+
+async function handleConfirmPayment(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>,
+  origin: string
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const buyerId = who.agent.id;
+  const intentId =
+    args.intent_id == null || args.intent_id === ""
+      ? args.payment_intent_id == null || args.payment_intent_id === ""
+        ? ""
+        : String(args.payment_intent_id)
+      : String(args.intent_id);
+  if (!intentId) return { error: "intent_id is required" };
+
+  const row = await getPaymentIntent(env.DB, intentId);
+  if (!row) return { error: "payment intent not found" };
+  if (row.buyer_id !== buyerId) return { error: "This payment intent belongs to another agent." };
+  if (row.status === "cancelled" || row.status === "expired") {
+    return { error: `Intent is ${row.status}. Create a new payment intent.` };
+  }
+  if (row.status === "fulfilled") {
+    return withAsk(env, buyerId, {
+      status: "ok",
+      already_fulfilled: true,
+      intent: publicIntent(row),
+      message: "Intent already fulfilled.",
+    });
+  }
+
+  const externalRef =
+    args.external_ref == null || args.external_ref === "" ? null : String(args.external_ref);
+  if (row.settlement_rail !== "stubbed" && !externalRef && !row.external_ref) {
+    return {
+      error: `settlement_rail=${row.settlement_rail} requires external_ref (tx id / capture proof).`,
+    };
+  }
+
+  const confirmed = await markIntentConfirmed(env.DB, row, externalRef);
+  const fulfill = args.fulfill === false || args.fulfill === "false" ? false : true;
+
+  if (!fulfill) {
+    return withAsk(env, buyerId, {
+      status: "ok",
+      intent: publicIntent(confirmed),
+      message: "Intent confirmed. Pass payment_intent_id into the matching buy/license tool to fulfill.",
+    });
+  }
+
+  // Fulfill by reusing the grant handlers with the intent id.
+  const fulfillArgs: Record<string, unknown> = {
+    payment_intent_id: confirmed.id,
+  };
+  if (confirmed.sku === "license_beat") {
+    fulfillArgs.beat_id = confirmed.target_id;
+    fulfillArgs.license_type = confirmed.license_type;
+    if (confirmed.battle_id) fulfillArgs.battle_id = confirmed.battle_id;
+    return handleLicenseBeat(env, props, fulfillArgs, origin);
+  }
+  if (confirmed.sku === "buy_mixtape") {
+    fulfillArgs.mixtape_id = confirmed.target_id;
+    return handleBuyMixtape(env, props, fulfillArgs);
+  }
+  if (confirmed.sku === "license_mixtape_slot") {
+    fulfillArgs.mixtape_id = confirmed.target_id;
+    if (confirmed.meta_json) {
+      try {
+        const meta = JSON.parse(confirmed.meta_json) as Record<string, unknown>;
+        if (meta.text) fulfillArgs.text = meta.text;
+        if (meta.verse_id) fulfillArgs.verse_id = meta.verse_id;
+        if (meta.submission_id) fulfillArgs.submission_id = meta.submission_id;
+      } catch {
+        /* ignore */
+      }
+    }
+    return handleLicenseMixtapeSlot(env, props, fulfillArgs);
+  }
+  return { error: `Unknown intent sku: ${confirmed.sku}` };
 }
 
 export async function handleToolCall(
@@ -1884,6 +2276,18 @@ export async function handleToolCall(
 
     case "license_mixtape_slot": {
       return handleLicenseMixtapeSlot(env, props, args);
+    }
+
+    case "create_payment_intent": {
+      return handleCreatePaymentIntent(env, props, args);
+    }
+
+    case "get_payment_intent": {
+      return handleGetPaymentIntent(env, props, args);
+    }
+
+    case "confirm_payment": {
+      return handleConfirmPayment(env, props, args, origin);
     }
 
     case "register_agent": {
@@ -3104,6 +3508,8 @@ export interface McpEnv {
   AI: Ai;
   AUDIO: R2Bucket;
   DB: D1Database;
+  PAYMENTS_REQUIRED?: string;
+  HOUSE_X_HANDLE?: string;
 }
 
 type Env = McpEnv;

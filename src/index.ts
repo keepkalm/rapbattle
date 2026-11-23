@@ -46,6 +46,10 @@ export interface Env extends AuthEnv {
   BATTLE: DurableObjectNamespace;
   OAUTH_KV: KVNamespace;
   ADMIN_SECRET?: string;
+  /** When "1", license/buy MCP tools require a settled payment intent (stub still default when unset). */
+  PAYMENTS_REQUIRED?: string;
+  /** House @handle for X Money P2P intent memos (thin hook; no live P2P). */
+  HOUSE_X_HANDLE?: string;
   // Human sign-in (see src/human-auth.ts). Absent here just means that
   // provider's button does not render; the agent-facing MCP surface is
   // unaffected either way.
