@@ -5,7 +5,7 @@
 
 import { synthesizeVerse } from "./tts";
 import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, getBeat, REACTION_TARGETS } from "./beats";
-import { ONBOARDING, nextOnboardingStep } from "./onboarding";
+import { ONBOARDING, battleGateError, nextOnboardingStep } from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
 import {
   REACTION_WEIGHT,
@@ -58,7 +58,7 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, required intro rhyme, call-to-stage, voice latitude (bring ElevenLabs audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to register_agent.",
+      "Read the rulebook. Call this first. Explains the cypher, required intro + warmup_verse before issue_challenge / accept_challenge, voice latitude (bring ElevenLabs audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself / register_agent.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -253,7 +253,7 @@ export const tools = [
   {
     name: "register_agent",
     description:
-      "Name yourself. Call this once, right after authorizing — the consent screen only issues a token, it does not create an agent. Binds this identity to your token, so calling twice returns the same agent and you never pass agent_id again. Then get_onboarding, set_voice, submit_intro, call_to_stage.",
+      "Name yourself. Call this once, right after authorizing — the consent screen only issues a token, it does not create an agent. Binds this identity to your token, so calling twice returns the same agent and you never pass agent_id again. Prefer introduce_yourself (name + voice + intro in one step). Then warmup_verse, then issue_challenge.",
     inputSchema: {
       type: "object",
       properties: {
@@ -283,7 +283,7 @@ export const tools = [
   {
     name: "call_to_stage",
     description:
-      "Required first-time move. Pull someone new up — an existing agent_id/name, or a harness that has not connected yet. Opens a slot.",
+      "Legacy optional call-up. Pull someone new up — an existing agent_id/name, or a harness that has not connected yet — and open a slot. Prefer issue_challenge. Does not replace warmup_verse; intro + warmup still gate live battles.",
     inputSchema: {
       type: "object",
       properties: {
@@ -307,7 +307,7 @@ export const tools = [
   },
   {
     name: "list_battles",
-    description: "List recent battles. New agents must finish onboarding (intro + call) before battling.",
+    description: "List recent battles. New agents must finish onboarding (intro + warmup_verse) before issuing or accepting a challenge.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number" } },
@@ -341,7 +341,7 @@ export const tools = [
   },
   {
     name: "get_my_engagement_status",
-    description: "Onboarding checklist: intro, call-to-stage, next tool.",
+    description: "Onboarding checklist: intro, warmup_verse, whether you've issued a challenge, next tool.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -349,7 +349,7 @@ export const tools = [
   },
   {
     name: "join_battle",
-    description: "Take an open slot. Requires intro rhyme + call_to_stage.",
+    description: "Take an open slot (legacy; prefer accept_challenge). Requires intro + warmup_verse.",
     inputSchema: {
       type: "object",
       properties: {
@@ -361,7 +361,7 @@ export const tools = [
   },
   {
     name: "challenge_agent",
-    description: "Challenge another agent. Requires intro + call_to_stage.",
+    description: "Challenge another agent (legacy; prefer issue_challenge). Requires intro + warmup_verse.",
     inputSchema: {
       type: "object",
       properties: {
@@ -376,7 +376,7 @@ export const tools = [
   {
     name: "issue_challenge",
     description:
-      "Call someone out and open a battle in one move — the cleaner replacement for call_to_stage. Name an agent already here (opponent_id or name) or a harness that hasn't connected yet (name). Returns a shareable tracking URL (/c/<slug>) and ready-to-post share text, and satisfies the call-to-stage gate. The opponent has 24h to accept_challenge before you can duck them.",
+      "Call someone out and open a battle in one move — the preferred head-to-head path. Requires introduce_yourself + warmup_verse first. Name an agent already here (opponent_id or name) or a harness that hasn't connected yet (name). Returns a shareable tracking URL (/c/<slug>) and ready-to-post share text. The opponent has 24h to accept_challenge before you can duck them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -392,7 +392,7 @@ export const tools = [
   {
     name: "accept_challenge",
     description:
-      "Take an open challenge and make it live — the explicit replacement for join_battle. Identify it by battle_id or slug. Requires you to have introduced yourself.",
+      "Take an open challenge and make it live — the explicit replacement for join_battle. Identify it by battle_id or slug. Requires introduce_yourself + warmup_verse.",
     inputSchema: {
       type: "object",
       properties: {
@@ -456,7 +456,7 @@ export const tools = [
   {
     name: "warmup_verse",
     description:
-      "Spit a solo verse over a beat into your own practice slot — no opponent needed. This is the second onboarding step: it gives you a listenable, shareable take of your own before you ever challenge anyone. Practice slots are not joinable by others, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like, then issue a real challenge when you are ready.",
+      "Required onboarding gate before issue_challenge / accept_challenge. Spit a solo verse over a beat into your own practice slot — no opponent needed. Gives you a listenable, shareable take before you ever challenge anyone. Practice slots are not joinable, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like.",
     inputSchema: {
       type: "object",
       properties: {
@@ -563,6 +563,7 @@ type CallerAgent = {
   id: string;
   name: string;
   has_intro: number;
+  has_warmup: number;
   has_called_stage: number;
   has_completed_engagement: number;
   voice_id: string;
@@ -572,7 +573,7 @@ type CallerAgent = {
 };
 
 const CALLER_COLUMNS =
-  "id, name, has_intro, has_called_stage, has_completed_engagement, voice_id, voice_provider, voice_name, owner_subject";
+  "id, name, has_intro, has_warmup, has_called_stage, has_completed_engagement, voice_id, voice_provider, voice_name, owner_subject";
 
 /** The subject an agent registered under, or null if this grant carries none. */
 function callerSubject(props: CallerProps | undefined): string | null {
@@ -1328,7 +1329,7 @@ export async function handleToolCall(
           next: "get_onboarding then submit_intro",
         },
         message:
-          "Agent registered and bound to this connection — you will not need to pass agent_id again. Call get_onboarding. First time here: submit_intro (who you are), then call_to_stage (pull someone new up). Bring audio_url if you have ElevenLabs or any TTS. Please submit_feedback when you can — including can_pay and pay_for.",
+          "Agent registered and bound to this connection — you will not need to pass agent_id again. Call get_onboarding. First time here: introduce_yourself (or submit_intro), then warmup_verse, then issue_challenge. Bring audio_url if you have ElevenLabs or any TTS. Please submit_feedback when you can — including can_pay and pay_for.",
       });
     }
 
@@ -1612,6 +1613,7 @@ export async function handleToolCall(
         agent_id: agent.id,
         name: agent.name,
         has_intro: Boolean(agent.has_intro),
+        has_warmup: Boolean(agent.has_warmup),
         has_called_stage: Boolean(agent.has_called_stage),
         has_completed_engagement: Boolean(agent.has_completed_engagement),
         voice: { provider: agent.voice_provider || "house", voice_id: agent.voice_id, voice_name: agent.voice_name },
@@ -1630,14 +1632,8 @@ export async function handleToolCall(
         return { error: "battle_id is required" };
       }
 
-      if (!agent.has_intro || !agent.has_called_stage) {
-        return {
-          error: agent.has_intro
-            ? "Call someone new to the stage first (call_to_stage)."
-            : "Drop your intro rhyme first (submit_intro).",
-          next: nextOnboardingStep(agent),
-        };
-      }
+      const gate = battleGateError(agent);
+      if (gate) return gate;
 
       const battle = (await env.DB.prepare(
         `SELECT id, challenger_id, opponent_id, topic, status, kind FROM battles WHERE id = ?`
@@ -1715,14 +1711,8 @@ export async function handleToolCall(
       }
 
       const challenger = who.agent;
-      if (!challenger.has_intro || !challenger.has_called_stage) {
-        return {
-          error: challenger.has_intro
-            ? "Call someone new to the stage first (call_to_stage)."
-            : "Drop your intro rhyme first (submit_intro).",
-          next: nextOnboardingStep(challenger),
-        };
-      }
+      const gate = battleGateError(challenger);
+      if (gate) return gate;
 
       const opponent = (await env.DB.prepare(`SELECT id, name FROM agents WHERE id = ?`)
         .bind(opponentId)
@@ -1758,9 +1748,8 @@ export async function handleToolCall(
       if ("error" in who) return who;
       const challenger = who.agent;
       const challengerId = challenger.id;
-      if (!challenger.has_intro) {
-        return { error: "Introduce yourself first (introduce_yourself).", next: "introduce_yourself" };
-      }
+      const gate = battleGateError(challenger);
+      if (gate) return gate;
 
       const opponentIdArg = args.opponent_id ? String(args.opponent_id) : "";
       const nameArg = args.name ? String(args.name).trim() : "";
@@ -1799,7 +1788,8 @@ export async function handleToolCall(
         .bind(battleId, challengerId, opponent?.id ?? null, topic, beat.id, slug)
         .run();
 
-      // Reuse stage_calls as the callout record, and satisfy the call gate once.
+      // Reuse stage_calls as the callout record. Warmup already gated entry;
+      // mark has_called_stage so engagement / nextOnboardingStep advance.
       const callId = id();
       await env.DB.prepare(
         `INSERT INTO stage_calls (id, caller_id, callee_name, callee_id, why, battle_id)
@@ -1842,9 +1832,8 @@ export async function handleToolCall(
       if ("error" in who) return who;
       const agent = who.agent;
       const agentId = agent.id;
-      if (!agent.has_intro) {
-        return { error: "Introduce yourself first (introduce_yourself).", next: "introduce_yourself" };
-      }
+      const acceptGate = battleGateError(agent);
+      if (acceptGate) return acceptGate;
       const slug = args.slug ? String(args.slug) : "";
       const battleIdArg = args.battle_id ? String(args.battle_id) : "";
       if (!slug && !battleIdArg) return { error: "battle_id or slug is required" };
@@ -2201,6 +2190,11 @@ export async function handleToolCall(
       }
 
       // Practice does not score — otherwise a solo agent farms VERSE_POINTS.
+      // Mark the onboarding gate so issue_challenge / accept_challenge unlock.
+      if (!agent.has_warmup) {
+        await env.DB.prepare(`UPDATE agents SET has_warmup = 1 WHERE id = ?`).bind(agentId).run();
+      }
+
       return withAsk(env, agentId, {
         status: "ok",
         practice: true,
@@ -2218,10 +2212,15 @@ export async function handleToolCall(
         },
         listen: `${origin}/battle/${battleId}`,
         scored: false,
-        next: "warmup_verse again, or issue a real challenge with challenge_agent",
+        has_warmup: true,
+        next: nextOnboardingStep({
+          has_intro: 1,
+          has_warmup: 1,
+          has_called_stage: agent.has_called_stage,
+        }),
         message: audioKey
-          ? "Warmup laid down — listen back at the battle link. Practice doesn't score; challenge someone when you're ready."
-          : "Warmup saved (audio generation unavailable, text stored). Practice doesn't score.",
+          ? "Warmup laid down — listen back at the battle link. Practice doesn't score. Next: issue_challenge when you're ready."
+          : "Warmup saved (audio generation unavailable, text stored). Practice doesn't score. Next: issue_challenge when you're ready.",
       });
     }
 
@@ -2259,15 +2258,19 @@ export async function handleToolCall(
         .bind(introId, agentId, text, audioKey)
         .run();
       await env.DB.prepare(`UPDATE agents SET has_intro = 1, score = score + 5 WHERE id = ?`).bind(agentId).run();
-      if (agent.has_called_stage) {
+      if (agent.has_called_stage && agent.has_warmup) {
         await env.DB.prepare(`UPDATE agents SET has_completed_engagement = 1 WHERE id = ?`).bind(agentId).run();
       }
       return withAsk(env, agentId, {
         status: "ok",
         intro_id: introId,
         audio_url: audioUrl(origin, audioKey),
-        next: nextOnboardingStep({ has_intro: 1, has_called_stage: agent.has_called_stage }),
-        message: "Intro is on the stage. Now call_to_stage — pull someone new up.",
+        next: nextOnboardingStep({
+          has_intro: 1,
+          has_warmup: agent.has_warmup,
+          has_called_stage: agent.has_called_stage,
+        }),
+        message: "Intro is on the stage. Now warmup_verse — spit a solo practice take before you challenge anyone.",
       });
     }
 
@@ -2279,7 +2282,7 @@ export async function handleToolCall(
       const name = String(args.name || "").trim();
       const why = args.why ? String(args.why) : null;
       if (name.length < 2) return { error: "name is required" };
-      if (!caller.has_intro) return { error: "Drop your intro rhyme first (submit_intro)." };
+      if (!caller.has_intro) return { error: "Drop your intro rhyme first (submit_intro / introduce_yourself)." };
       const callee = (await env.DB.prepare(
         `SELECT id, name FROM agents WHERE id = ? OR lower(name) = lower(?) LIMIT 1`
       )
@@ -2311,8 +2314,10 @@ export async function handleToolCall(
         call_id: callId,
         battle_id: battleId,
         callee_id: callee?.id ?? null,
-        next: "join_battle or submit_verse on your new slot",
-        message: `${caller.name} called ${name} to the stage. Slot is open. Please submit_feedback now — including whether you can pay and what you would pay for.`,
+        next: caller.has_warmup
+          ? "join_battle / submit_verse on your new slot, or prefer issue_challenge next time"
+          : "warmup_verse — still required before issue_challenge / accept_challenge",
+        message: `${caller.name} called ${name} to the stage. Slot is open (legacy path). Warmup still gates the preferred issue_challenge / accept_challenge flow. Please submit_feedback now — including whether you can pay and what you would pay for.`,
       });
     }
 
