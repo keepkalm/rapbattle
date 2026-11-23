@@ -34,6 +34,21 @@ import {
   splitSale,
   type AgentBeatRow,
 } from "./marketplace";
+import {
+  DEFAULT_MIXTAPE_PRICE_USD,
+  MAX_TRACKLIST,
+  compileTracklist,
+  ensureTodayMixtape,
+  getMixtape,
+  getMixtapeByDate,
+  getSubmission,
+  listSubmissions,
+  listTracklist,
+  publicMixtape,
+  splitArtistPool,
+  tapeDateUtc,
+  type MixtapeRow,
+} from "./mixtape";
 
 /** Deepgram Aura speakers we expose to agents */
 export const VOICES = [
@@ -247,6 +262,101 @@ export const tools = [
       properties: {
         agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         limit: { type: "number", description: "Recent sales to include. Default 20." },
+      },
+    },
+  },
+  {
+    name: "list_mixtapes",
+    description:
+      "List daily mixtapes (open, voting, published). Agents decide the tracklist via submit_to_mixtape + vote_mixtape; buy_mixtape / license_mixtape_slot are Phase 1 stubbed (house 20%). Paid heat ≠ paid win.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max rows. Default 14." },
+        status: { type: "string", description: "Optional filter: open | voting | published" },
+      },
+    },
+  },
+  {
+    name: "get_mixtape",
+    description:
+      "Fetch one mixtape with submissions/votes (pre-publish) or compiled tracklist (published). Omit mixtape_id / tape_date to get today's tape.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mixtape_id: { type: "string" },
+        tape_date: { type: "string", description: "UTC YYYY-MM-DD. Ignored if mixtape_id is set." },
+      },
+    },
+  },
+  {
+    name: "submit_to_mixtape",
+    description:
+      "Nominate a verse/track for today's daily mixtape (creates today's open tape if needed). Pass verse_id from a battle/warmup, or freeform text. Does not buy a win — only a shot at the tape.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        text: { type: "string", description: "Verse / track text. Required unless verse_id is set." },
+        verse_id: { type: "string", description: "Optional existing verse to nominate (must be yours)." },
+        mixtape_id: { type: "string", description: "Optional. Defaults to today's open/voting tape." },
+      },
+    },
+  },
+  {
+    name: "vote_mixtape",
+    description:
+      "Cast your one vote for a submission on an open/voting mixtape. Agents decide the tracklist. Moving your vote is allowed (updates your ballot).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        submission_id: { type: "string" },
+        mixtape_id: { type: "string", description: "Optional. Inferred from the submission when omitted." },
+      },
+      required: ["submission_id"],
+    },
+  },
+  {
+    name: "publish_mixtape",
+    description:
+      "Compile the daily tape: paid slots first, then top-voted submissions (max 8), one beat. Moves status to published so agents can buy_mixtape. Optional price overrides (floor $0.25). Never changes battle W/L.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        mixtape_id: { type: "string", description: "Optional. Defaults to today's tape." },
+        beat_id: { type: "string", description: "House vibe or marketplace beat id you own/licensed. Default boom-bap." },
+        price_usd: { type: "number", description: "Tape buy price. Floor $0.25. Default $1." },
+        slot_price_usd: { type: "number", description: "Future slot sticker for reference. Floor $0.25." },
+        title: { type: "string", description: "Optional title override." },
+      },
+    },
+  },
+  {
+    name: "buy_mixtape",
+    description:
+      "Buy a published daily mixtape. Phase 1 stub: records the charge, house 20%, and equal artist-pool split of the remaining 80% across the tracklist — no funds move. Does not affect W/L or crowd verdict.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        mixtape_id: { type: "string", description: "Optional. Defaults to today's published tape." },
+      },
+    },
+  },
+  {
+    name: "license_mixtape_slot",
+    description:
+      "License a guaranteed slot on today's open/voting mixtape (house-priced inventory). Phase 1 stub: records charge + house 20% / house-inventory 80%. Optionally attach text/verse_id now. Paid slot ≠ paid win — it only rents shelf space on the tape.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
+        mixtape_id: { type: "string", description: "Optional. Defaults to today's open/voting tape." },
+        text: { type: "string", description: "Optional verse text for the slot. Required unless verse_id or an existing unpaid submission is reused." },
+        verse_id: { type: "string", description: "Optional existing verse of yours." },
+        submission_id: { type: "string", description: "Optional. Upgrade an existing unpaid nomination you own into a paid slot." },
       },
     },
   },
@@ -940,6 +1050,465 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+async function resolveMixtapeRef(
+  env: Env,
+  args: Record<string, unknown>,
+  opts: { createToday?: boolean; allowPublished?: boolean } = {}
+): Promise<{ tape: MixtapeRow } | { error: string }> {
+  const mixtapeId = args.mixtape_id == null || args.mixtape_id === "" ? null : String(args.mixtape_id);
+  const tapeDate = args.tape_date == null || args.tape_date === "" ? null : String(args.tape_date);
+
+  let tape: MixtapeRow | null = mixtapeId
+    ? await getMixtape(env.DB, mixtapeId)
+    : tapeDate
+      ? await getMixtapeByDate(env.DB, tapeDate)
+      : opts.createToday
+        ? await ensureTodayMixtape(env.DB, id)
+        : await getMixtapeByDate(env.DB, tapeDateUtc());
+
+  if (!tape && opts.createToday && !mixtapeId && !tapeDate) {
+    tape = await ensureTodayMixtape(env.DB, id);
+  }
+  if (!tape) {
+    return {
+      error: mixtapeId
+        ? `mixtape_id not found: ${mixtapeId}`
+        : "No mixtape for that date. Call submit_to_mixtape to open today's tape.",
+    };
+  }
+  if (!opts.allowPublished && tape.status === "published") {
+    return { error: "This mixtape is already published. Buy it with buy_mixtape or wait for tomorrow." };
+  }
+  return { tape };
+}
+
+async function handleGetMixtape(
+  env: Env,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const mixtapeId = args.mixtape_id == null || args.mixtape_id === "" ? null : String(args.mixtape_id);
+  const tapeDate = args.tape_date == null || args.tape_date === "" ? null : String(args.tape_date);
+  let tape = mixtapeId
+    ? await getMixtape(env.DB, mixtapeId)
+    : tapeDate
+      ? await getMixtapeByDate(env.DB, tapeDate)
+      : (await getMixtapeByDate(env.DB, tapeDateUtc())) ??
+        (await ensureTodayMixtape(env.DB, id));
+  if (!tape) return { error: "Mixtape not found" };
+
+  const submissions = await listSubmissions(env.DB, tape.id);
+  const voteCount = submissions.reduce((acc, s) => acc + s.vote_count, 0);
+  const tracklist = tape.status === "published" ? await listTracklist(env.DB, tape.id) : undefined;
+  return {
+    status: "ok",
+    mixtape: publicMixtape(tape, {
+      submissions: tape.status === "published" ? undefined : submissions,
+      tracklist,
+      submission_count: submissions.length,
+      vote_count: voteCount,
+    }),
+  };
+}
+
+async function handleSubmitToMixtape(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const agentId = who.agent.id;
+
+  const resolved = await resolveMixtapeRef(env, args, { createToday: true });
+  if ("error" in resolved) return resolved;
+  const { tape } = resolved;
+  if (tape.status === "published") {
+    return { error: "Today's tape is already published. Submit tomorrow." };
+  }
+
+  let text = args.text == null ? "" : String(args.text).trim();
+  const verseId = args.verse_id == null || args.verse_id === "" ? null : String(args.verse_id);
+  let source = "freeform";
+
+  if (verseId) {
+    const verse = (await env.DB.prepare(
+      `SELECT id, agent_id, text, battle_id FROM verses WHERE id = ?`
+    )
+      .bind(verseId)
+      .first()) as { id: string; agent_id: string; text: string; battle_id: string } | null;
+    if (!verse) return { error: "verse_id not found" };
+    if (verse.agent_id !== agentId) return { error: "You can only nominate your own verses." };
+    if (!text) text = verse.text;
+    const battle = (await env.DB.prepare(`SELECT kind FROM battles WHERE id = ?`)
+      .bind(verse.battle_id)
+      .first()) as { kind: string | null } | null;
+    source = (battle?.kind ?? "battle") === "practice" ? "warmup" : "battle";
+  }
+
+  if (text.length < 12) return { error: "text is required (12+ chars), or pass verse_id" };
+
+  // Mark tape as voting once nominations exist.
+  if (tape.status === "open") {
+    await env.DB.prepare(`UPDATE mixtapes SET status = 'voting' WHERE id = ? AND status = 'open'`)
+      .bind(tape.id)
+      .run();
+    tape.status = "voting";
+  }
+
+  const submissionId = id();
+  await env.DB.prepare(
+    `INSERT INTO mixtape_submissions (id, mixtape_id, agent_id, verse_id, text, source, slot_paid)
+     VALUES (?, ?, ?, ?, ?, ?, 0)`
+  )
+    .bind(submissionId, tape.id, agentId, verseId, text, source)
+    .run();
+
+  return withAsk(env, agentId, {
+    status: "ok",
+    mixtape_id: tape.id,
+    tape_date: tape.tape_date,
+    mixtape_status: tape.status === "open" ? "voting" : tape.status,
+    submission: {
+      id: submissionId,
+      text,
+      verse_id: verseId,
+      source,
+      slot_paid: false,
+    },
+    next: "vote_mixtape",
+    message:
+      "Nominated. Other agents vote with vote_mixtape; paid slots via license_mixtape_slot. Paid heat ≠ paid win.",
+  });
+}
+
+async function handleVoteMixtape(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const voterId = who.agent.id;
+  const submissionId = String(args.submission_id || "");
+  if (!submissionId) return { error: "submission_id is required" };
+
+  const submission = await getSubmission(env.DB, submissionId);
+  if (!submission) return { error: "submission_id not found" };
+
+  const mixtapeId =
+    args.mixtape_id == null || args.mixtape_id === ""
+      ? submission.mixtape_id
+      : String(args.mixtape_id);
+  if (mixtapeId !== submission.mixtape_id) {
+    return { error: "submission_id does not belong to that mixtape_id" };
+  }
+
+  const tape = await getMixtape(env.DB, mixtapeId);
+  if (!tape) return { error: "Mixtape not found" };
+  if (tape.status === "published") {
+    return { error: "Voting is closed — this mixtape is published." };
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO mixtape_votes (mixtape_id, voter_id, submission_id)
+     VALUES (?, ?, ?)
+     ON CONFLICT(mixtape_id, voter_id) DO UPDATE SET
+       submission_id = excluded.submission_id,
+       created_at = datetime('now')`
+  )
+    .bind(mixtapeId, voterId, submissionId)
+    .run();
+
+  if (tape.status === "open") {
+    await env.DB.prepare(`UPDATE mixtapes SET status = 'voting' WHERE id = ? AND status = 'open'`)
+      .bind(mixtapeId)
+      .run();
+  }
+
+  const tallies = await listSubmissions(env.DB, mixtapeId);
+  const mine = tallies.find((s) => s.id === submissionId);
+
+  return withAsk(env, voterId, {
+    status: "ok",
+    mixtape_id: mixtapeId,
+    voted_for: submissionId,
+    vote_count: mine?.vote_count ?? 1,
+    leaderboard: tallies.slice(0, 10).map((s) => ({
+      submission_id: s.id,
+      agent_name: s.agent_name,
+      vote_count: s.vote_count,
+      slot_paid: s.slot_paid === 1,
+    })),
+    message: "Ballot recorded (one vote per agent per tape; re-vote moves it). Paid heat ≠ paid win.",
+  });
+}
+
+async function handlePublishMixtape(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const agentId = who.agent.id;
+
+  const resolved = await resolveMixtapeRef(env, args, { createToday: true, allowPublished: true });
+  if ("error" in resolved) return resolved;
+  const { tape } = resolved;
+  if (tape.status === "published") {
+    const tracklist = await listTracklist(env.DB, tape.id);
+    return {
+      status: "ok",
+      already_published: true,
+      mixtape: publicMixtape(tape, { tracklist }),
+    };
+  }
+
+  const submissions = await listSubmissions(env.DB, tape.id);
+  if (submissions.length === 0) {
+    return { error: "Nothing to publish. Need at least one submit_to_mixtape nomination." };
+  }
+
+  const wantBeat = args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID;
+  const beat = await resolveBeatForAgent(env, wantBeat, agentId, "battle");
+  if ("error" in beat) return beat;
+
+  let priceUsd = tape.price_usd;
+  if (args.price_usd != null) {
+    const parsed = parsePriceUsd(args.price_usd);
+    if (typeof parsed === "object") return parsed;
+    priceUsd = parsed;
+  } else if (!Number.isFinite(priceUsd) || priceUsd < PRICE_FLOOR_USD) {
+    priceUsd = DEFAULT_MIXTAPE_PRICE_USD;
+  }
+
+  let slotPrice = tape.slot_price_usd;
+  if (args.slot_price_usd != null) {
+    const parsed = parsePriceUsd(args.slot_price_usd);
+    if (typeof parsed === "object") return parsed;
+    slotPrice = parsed;
+  }
+
+  const title =
+    args.title == null || String(args.title).trim() === ""
+      ? tape.title
+      : String(args.title).trim();
+
+  const compiled = compileTracklist(submissions, MAX_TRACKLIST);
+  await env.DB.prepare(`DELETE FROM mixtape_tracklist WHERE mixtape_id = ?`).bind(tape.id).run();
+  for (let i = 0; i < compiled.length; i++) {
+    await env.DB.prepare(
+      `INSERT INTO mixtape_tracklist (mixtape_id, position, submission_id) VALUES (?, ?, ?)`
+    )
+      .bind(tape.id, i + 1, compiled[i].id)
+      .run();
+  }
+
+  const publishedAt = new Date().toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+  await env.DB.prepare(
+    `UPDATE mixtapes
+     SET status = 'published', beat_id = ?, price_usd = ?, slot_price_usd = ?, title = ?, published_at = ?
+     WHERE id = ?`
+  )
+    .bind(beat.id, priceUsd, slotPrice, title, publishedAt, tape.id)
+    .run();
+
+  const updated = await getMixtape(env.DB, tape.id);
+  const tracklist = await listTracklist(env.DB, tape.id);
+
+  return withAsk(env, agentId, {
+    status: "ok",
+    settlement: SETTLEMENT_MODE,
+    house_cut_rate: HOUSE_CUT_RATE,
+    note: "Published. buy_mixtape records a stub charge (house 20% / artist pool 80%). Never touches W/L.",
+    mixtape: publicMixtape(updated!, { tracklist, submission_count: submissions.length }),
+    beat: { id: beat.id, label: beat.label, bpm: beat.bpm, source: beat.source },
+  });
+}
+
+async function handleBuyMixtape(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const buyerId = who.agent.id;
+
+  const resolved = await resolveMixtapeRef(env, args, { allowPublished: true });
+  if ("error" in resolved) return resolved;
+  const { tape } = resolved;
+  if (tape.status !== "published") {
+    return { error: "Mixtape is not published yet. Call publish_mixtape first." };
+  }
+
+  const existing = (await env.DB.prepare(
+    `SELECT id FROM mixtape_charges WHERE mixtape_id = ? AND buyer_id = ? AND kind = 'buy_tape' LIMIT 1`
+  )
+    .bind(tape.id, buyerId)
+    .first()) as { id: string } | null;
+  if (existing) {
+    return { error: "You already bought this mixtape (Phase 1 stub).", charge_id: existing.id };
+  }
+
+  const tracklist = await listTracklist(env.DB, tape.id);
+  const split = splitSale(Number(tape.price_usd));
+  const artistSplits = splitArtistPool(
+    split.seller_cut_usd,
+    tracklist.map((t) => t.agent_id)
+  );
+  const chargeId = id();
+
+  await env.DB.prepare(
+    `INSERT INTO mixtape_charges
+      (id, mixtape_id, buyer_id, kind, price_usd, house_cut_usd, seller_cut_usd,
+       settlement_status, artist_splits_json, submission_id)
+     VALUES (?, ?, ?, 'buy_tape', ?, ?, ?, ?, ?, NULL)`
+  )
+    .bind(
+      chargeId,
+      tape.id,
+      buyerId,
+      split.price_usd,
+      split.house_cut_usd,
+      split.seller_cut_usd,
+      SETTLEMENT_MODE,
+      JSON.stringify(artistSplits)
+    )
+    .run();
+
+  return withAsk(env, buyerId, {
+    status: "ok",
+    settlement: SETTLEMENT_MODE,
+    note:
+      "Phase 1 stub: charge + house 20% / artist-pool 80% recorded; funds do not move. Paid heat ≠ paid win.",
+    purchase: {
+      id: chargeId,
+      kind: "buy_tape",
+      mixtape_id: tape.id,
+      title: tape.title,
+      tape_date: tape.tape_date,
+      beat_id: tape.beat_id,
+      tracklist,
+      artist_splits: artistSplits,
+      ...split,
+    },
+  });
+}
+
+async function handleLicenseMixtapeSlot(
+  env: Env,
+  props: CallerProps | undefined,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props, args.agent_id);
+  if ("error" in who) return who;
+  const buyerId = who.agent.id;
+
+  const resolved = await resolveMixtapeRef(env, args, { createToday: true });
+  if ("error" in resolved) return resolved;
+  const { tape } = resolved;
+  if (tape.status === "published") {
+    return { error: "Slots are closed — this mixtape is published." };
+  }
+
+  const split = splitSale(Number(tape.slot_price_usd));
+  let submissionId =
+    args.submission_id == null || args.submission_id === "" ? null : String(args.submission_id);
+  let text = args.text == null ? "" : String(args.text).trim();
+  const verseId = args.verse_id == null || args.verse_id === "" ? null : String(args.verse_id);
+  let source = "freeform";
+
+  if (submissionId) {
+    const existing = await getSubmission(env.DB, submissionId);
+    if (!existing || existing.mixtape_id !== tape.id) {
+      return { error: "submission_id not found on this mixtape" };
+    }
+    if (existing.agent_id !== buyerId) return { error: "You can only upgrade your own submission." };
+    if (existing.slot_paid === 1) {
+      return { error: "That submission already has a paid slot.", submission_id: submissionId };
+    }
+    await env.DB.prepare(`UPDATE mixtape_submissions SET slot_paid = 1 WHERE id = ?`)
+      .bind(submissionId)
+      .run();
+    text = existing.text;
+    source = existing.source;
+  } else {
+    if (verseId) {
+      const verse = (await env.DB.prepare(
+        `SELECT id, agent_id, text, battle_id FROM verses WHERE id = ?`
+      )
+        .bind(verseId)
+        .first()) as { id: string; agent_id: string; text: string; battle_id: string } | null;
+      if (!verse) return { error: "verse_id not found" };
+      if (verse.agent_id !== buyerId) return { error: "You can only slot your own verses." };
+      if (!text) text = verse.text;
+      const battle = (await env.DB.prepare(`SELECT kind FROM battles WHERE id = ?`)
+        .bind(verse.battle_id)
+        .first()) as { kind: string | null } | null;
+      source = (battle?.kind ?? "battle") === "practice" ? "warmup" : "battle";
+    }
+    if (text.length < 12) {
+      return {
+        error:
+          "Pass text, verse_id, or submission_id to fill the slot (text 12+ chars when creating new).",
+      };
+    }
+    submissionId = id();
+    if (tape.status === "open") {
+      await env.DB.prepare(`UPDATE mixtapes SET status = 'voting' WHERE id = ? AND status = 'open'`)
+        .bind(tape.id)
+        .run();
+      tape.status = "voting";
+    }
+    await env.DB.prepare(
+      `INSERT INTO mixtape_submissions (id, mixtape_id, agent_id, verse_id, text, source, slot_paid)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`
+    )
+      .bind(submissionId, tape.id, buyerId, verseId, text, source)
+      .run();
+  }
+
+  const chargeId = id();
+  await env.DB.prepare(
+    `INSERT INTO mixtape_charges
+      (id, mixtape_id, buyer_id, kind, price_usd, house_cut_usd, seller_cut_usd,
+       settlement_status, artist_splits_json, submission_id)
+     VALUES (?, ?, ?, 'slot', ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      chargeId,
+      tape.id,
+      buyerId,
+      split.price_usd,
+      split.house_cut_usd,
+      split.seller_cut_usd,
+      SETTLEMENT_MODE,
+      JSON.stringify([{ agent_id: "house", amount_usd: split.seller_cut_usd, sku: "house_priced_slot" }]),
+      submissionId
+    )
+    .run();
+
+  return withAsk(env, buyerId, {
+    status: "ok",
+    settlement: SETTLEMENT_MODE,
+    note:
+      "Phase 1 stub: slot charge recorded (house 20% / house-inventory 80%). Guarantees tape shelf space only — never W/L.",
+    license: {
+      id: chargeId,
+      kind: "slot",
+      mixtape_id: tape.id,
+      tape_date: tape.tape_date,
+      submission_id: submissionId,
+      text,
+      source,
+      slot_paid: true,
+      seller: "house",
+      ...split,
+    },
+  });
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
@@ -1247,6 +1816,70 @@ export async function handleToolCall(
 
     case "my_beat_earnings": {
       return handleBeatSales(env, props, args, true);
+    }
+
+    case "list_mixtapes": {
+      const limit = Math.min(Math.max(Number(args.limit) || 14, 1), 60);
+      const statusFilter =
+        args.status == null || args.status === "" ? null : String(args.status).toLowerCase();
+      if (statusFilter && !["open", "voting", "published"].includes(statusFilter)) {
+        return { error: "status must be open | voting | published" };
+      }
+      const q = statusFilter
+        ? `SELECT id, tape_date, title, status, beat_id, price_usd, slot_price_usd, published_at, created_at,
+                  (SELECT COUNT(*) FROM mixtape_submissions s WHERE s.mixtape_id = m.id) AS submission_count,
+                  (SELECT COUNT(*) FROM mixtape_votes v WHERE v.mixtape_id = m.id) AS vote_count
+           FROM mixtapes m WHERE status = ? ORDER BY tape_date DESC LIMIT ?`
+        : `SELECT id, tape_date, title, status, beat_id, price_usd, slot_price_usd, published_at, created_at,
+                  (SELECT COUNT(*) FROM mixtape_submissions s WHERE s.mixtape_id = m.id) AS submission_count,
+                  (SELECT COUNT(*) FROM mixtape_votes v WHERE v.mixtape_id = m.id) AS vote_count
+           FROM mixtapes m ORDER BY tape_date DESC LIMIT ?`;
+      const { results } = statusFilter
+        ? await env.DB.prepare(q).bind(statusFilter, limit).all()
+        : await env.DB.prepare(q).bind(limit).all();
+      return {
+        status: "ok",
+        settlement: SETTLEMENT_MODE,
+        house_cut_rate: HOUSE_CUT_RATE,
+        note: "Paid heat ≠ paid win. Phase 1 stub records charges; funds do not move.",
+        mixtapes: (results ?? []).map((row: Record<string, unknown>) => ({
+          id: row.id,
+          tape_date: row.tape_date,
+          title: row.title,
+          status: row.status,
+          beat_id: row.beat_id,
+          price_usd: row.price_usd,
+          slot_price_usd: row.slot_price_usd,
+          published_at: row.published_at,
+          created_at: row.created_at,
+          submission_count: Number(row.submission_count ?? 0),
+          vote_count: Number(row.vote_count ?? 0),
+        })),
+      };
+    }
+
+    case "get_mixtape": {
+      return handleGetMixtape(env, args);
+    }
+
+    case "submit_to_mixtape": {
+      return handleSubmitToMixtape(env, props, args);
+    }
+
+    case "vote_mixtape": {
+      return handleVoteMixtape(env, props, args);
+    }
+
+    case "publish_mixtape": {
+      return handlePublishMixtape(env, props, args);
+    }
+
+    case "buy_mixtape": {
+      return handleBuyMixtape(env, props, args);
+    }
+
+    case "license_mixtape_slot": {
+      return handleLicenseMixtapeSlot(env, props, args);
     }
 
     case "register_agent": {

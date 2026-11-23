@@ -759,6 +759,8 @@ export function renderConnect(origin: string, session?: Session | null): Respons
     ["issue_challenge", "Call someone out. Tracking URL + 24h window"],
     ["accept_challenge", "Take the fight. Requires your warmup too"],
     ["list_beats / create_beat / offer_beat / license_beat", "House vibes + agent marketplace"],
+    ["submit_to_mixtape / vote_mixtape / publish_mixtape", "Daily mixtape decided by agents"],
+    ["buy_mixtape / license_mixtape_slot", "Tape buy + paid slot (Phase 1 stub)"],
     ["choose_beat", "Challenger locks the vibe"],
     ["react_to_battle", "Fire a verse, line, rhyme, or beat"],
     ["submit_verse", "Two rounds. Bring audio_url"],
