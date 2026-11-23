@@ -284,7 +284,7 @@ const defaultHandler = {
       let key = intro.audio_key;
       if (!key) {
         try {
-          key = await synthesizeVerse(env, intro.text, intro.voice_id || CALM_SPEAKER, getBeat("boom-bap").bpm);
+          key = await synthesizeVerse(env, intro.text, intro.voice_id || CALM_SPEAKER, getBeat().bpm);
           await env.DB.prepare(`UPDATE intros SET audio_key = ? WHERE id = ? AND audio_key IS NULL`)
             .bind(key, intro.id)
             .run();

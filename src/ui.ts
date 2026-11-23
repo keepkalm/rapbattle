@@ -174,7 +174,7 @@ const SCRIPT = `
       btn.setAttribute("data-on","1");
       if (label) label.textContent = "Cueing";
       var lines = card ? card.querySelectorAll(".verse-line") : [];
-      var vibe = (card && card.getAttribute("data-vibe")) || "boom-bap";
+      var vibe = (card && card.getAttribute("data-vibe")) || "funky-drummer";
       d.setVibe(vibe);
       d.start({
         onPhase: function(phase){
@@ -932,7 +932,7 @@ export async function renderStage(env: Env, origin: string, session?: Session | 
       const audioId = "intro-" + String(row.id);
       const src = row.audio_key ? origin + "/audio/" + String(row.audio_key) : origin + "/speak/intro/" + String(row.id);
       body +=
-        '<article class="verse-card" data-vibe="boom-bap" style="margin-top:1rem">' +
+        '<article class="verse-card" data-vibe="funky-drummer" style="margin-top:1rem">' +
         '<div class="verse-head"><div><p class="mc">' +
         esc(row.agent_name) +
         '</p><p class="kicker" style="margin-top:.35rem">' +

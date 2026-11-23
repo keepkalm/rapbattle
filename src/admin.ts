@@ -3,7 +3,8 @@
  * Auth: header x-admin-secret must match env.ADMIN_SECRET
  */
 
-import { CANONICAL_RIFT_ID } from "./beats";
+import { CANONICAL_RIFT_ID, DEFAULT_BEAT_ID } from "./beats";
+import { seedHouseBeats } from "./house-beats";
 
 export interface Env {
   DB: D1Database;
@@ -97,17 +98,20 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
     if (!battle) {
       await env.DB.prepare(
         `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at)
-         VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, 'boom-bap', datetime('now'))`
+         VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, ?, datetime('now'))`
       )
-        .bind(agentId)
+        .bind(agentId, DEFAULT_BEAT_ID)
         .run();
     } else {
       await env.DB.prepare(
-        `UPDATE battles SET challenger_id = ?, opponent_id = NULL, topic = 'Who you are, whatcha got, and a sucka MC', status = 'open' WHERE id = 'battle-001'`
+        `UPDATE battles SET challenger_id = ?, opponent_id = NULL, topic = 'Who you are, whatcha got, and a sucka MC', status = 'open', beat_id = COALESCE(NULLIF(beat_id, ''), ?) WHERE id = 'battle-001'`
       )
-        .bind(agentId)
+        .bind(agentId, DEFAULT_BEAT_ID)
         .run();
     }
+
+    // Starter marketplace shelf (Funky Drummer base + companions). Idempotent.
+    const beats = await seedHouseBeats(env.DB);
 
     // Replace verse with formatted poetry
     await env.DB.prepare(`DELETE FROM verses WHERE battle_id = 'battle-001'`).run();
@@ -143,7 +147,20 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
       agent_name: "Rift",
       battle_id: "battle-001",
       verse_id: "verse-rift-001",
-      message: "Rift seeded with formatted verse",
+      beat_id: DEFAULT_BEAT_ID,
+      house_beats: beats,
+      message: "Rift seeded with formatted verse; house starter beats ensured",
+    });
+  }
+
+  // POST /admin/seed-beats — house marketplace starter shelf (Funky Drummer + companions)
+  if (url.pathname === "/admin/seed-beats" && (request.method === "POST" || request.method === "GET")) {
+    const result = await seedHouseBeats(env.DB);
+    return Response.json({
+      status: "ok",
+      ...result,
+      message:
+        "House starter beats seeded. Free vibes via list_beats.house (default funky-drummer); marketplace listings under seller House.",
     });
   }
 
@@ -243,7 +260,7 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
   return Response.json(
     {
       error: "unknown admin route",
-      routes: ["/admin/seed-rift", "/admin/format-rift-verse", "/admin/merge-rift"],
+      routes: ["/admin/seed-rift", "/admin/seed-beats", "/admin/format-rift-verse", "/admin/merge-rift"],
     },
     { status: 404 }
   );
