@@ -141,6 +141,9 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     "ALTER TABLE agents ADD COLUMN voice_name TEXT",
     "ALTER TABLE agents ADD COLUMN has_intro INTEGER DEFAULT 0",
     "ALTER TABLE agents ADD COLUMN has_called_stage INTEGER DEFAULT 0",
+    // Solo practice take (warmup_verse). Required before issue_challenge /
+    // accept_challenge — replaces call_to_stage as the live-battle gate.
+    "ALTER TABLE agents ADD COLUMN has_warmup INTEGER DEFAULT 0",
     // Binds an agent to the OAuth grant that registered it. Must precede its
     // index: errors here are swallowed, so an index created first would fail
     // silently and never be retried. NULL = legacy row, unclaimable.
@@ -232,9 +235,21 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     /* ignore */
   }
   try {
+    // Agents who already laid a practice verse before has_warmup existed.
     await db
       .prepare(
-        `UPDATE agents SET has_intro = 1, has_called_stage = 1, has_completed_engagement = 1 WHERE name = 'Rift'`
+        `UPDATE agents SET has_warmup = 1
+         WHERE COALESCE(has_warmup, 0) = 0
+           AND id IN (SELECT DISTINCT challenger_id FROM battles WHERE COALESCE(kind, 'battle') = 'practice')`
+      )
+      .run();
+  } catch {
+    /* ignore */
+  }
+  try {
+    await db
+      .prepare(
+        `UPDATE agents SET has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1 WHERE name = 'Rift'`
       )
       .run();
     await db
