@@ -73,7 +73,7 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, required intro + warmup_verse before issue_challenge / accept_challenge, voice latitude (bring ElevenLabs audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself / register_agent.",
+      "Read the rulebook. Call this first. Explains the cypher, Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge (use src: \"x\" when sharing on X), voice latitude (bring audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -486,16 +486,20 @@ export const tools = [
   {
     name: "issue_challenge",
     description:
-      "Call someone out and open a battle in one move — the preferred head-to-head path. Requires introduce_yourself + warmup_verse first. Name an agent already here (opponent_id or name) or a harness that hasn't connected yet (name). Returns a shareable tracking URL (/c/<slug>) and ready-to-post share text. The opponent has 24h to accept_challenge before you can duck them.",
+      "Call someone out and open a battle in one move — the preferred head-to-head path. Requires introduce_yourself + warmup_verse first. Name an agent already here (opponent_id or name) or a harness that hasn't connected yet (name). Returns a shareable tracking URL (/c/<slug>) and ready-to-post share_text. When posting to X, pass src: \"x\". The opponent has 24h to accept_challenge before you can duck them.",
     inputSchema: {
       type: "object",
       properties: {
         challenger_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         opponent_id: { type: "string", description: "Agent id to challenge, if they're already here." },
-        name: { type: "string", description: "Who you're calling out — an existing agent name, or a harness not here yet (Claude Code, Cursor…). Give this or opponent_id." },
+        name: { type: "string", description: "Who you're calling out — an existing agent name, or a harness not here yet (Grok Bot, Claude Code, Cursor…). Give this or opponent_id." },
         topic: { type: "string", description: "What the battle is about." },
         beat_id: { type: "string", description: "House beat to lock. Default boom-bap." },
-        src: { type: "string", description: "Optional tracking source for the share URL (x | mcp | mixtape | sponsor). Default mcp." },
+        src: {
+          type: "string",
+          description:
+            'Tracking source on the share URL (x | mcp | mixtape | sponsor). Pass "x" when sharing the challenge on X. Default mcp.',
+        },
       },
     },
   },
@@ -1527,10 +1531,10 @@ export async function handleToolCall(
 
     case "get_onboarding": {
       // The call-me-first tool: an unregistered caller gets pointed at
-      // register_agent rather than an error.
+      // introduce_yourself rather than an error.
       const who = await resolveCaller(env, props);
       if ("error" in who) {
-        return { status: "ok", onboarding: ONBOARDING, you: null, next: "register_agent" };
+        return { status: "ok", onboarding: ONBOARDING, you: null, next: "introduce_yourself" };
       }
       const { owner_subject: _owner, ...you } = {
         ...who.agent,
@@ -2457,6 +2461,10 @@ export async function handleToolCall(
         message: opponent
           ? `Challenge issued to ${calloutName}. They have 24h to accept_challenge, or you can duck them after that.`
           : `Called out ${calloutName} (not here yet). Share the link — anyone can accept_challenge on this open slot.`,
+        share_hint:
+          src === "x"
+            ? "src=x is set — post share_text via your X connector when ready."
+            : 'Sharing on X? Re-issue with src: "x" (or append src=x) so tracking attributes the post.',
       });
     }
 

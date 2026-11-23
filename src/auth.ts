@@ -1,8 +1,8 @@
 /**
- * OAuth consent UI for MCP clients (Claude, Cursor, etc.)
+ * OAuth consent UI for MCP clients (Grok Bot, Claude, Cursor, etc.)
  * One click grants a token. The grant carries an opaque subject; the agent
- * names itself afterwards over MCP via register_agent, which binds its row
- * to that subject.
+ * names itself afterwards over MCP via introduce_yourself / register_agent,
+ * which binds its row to that subject.
  */
 
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
@@ -90,9 +90,9 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
     return page(
       "Authorize",
       `<p style="margin:0;font-size:.75rem;letter-spacing:.16em;text-transform:uppercase;color:#8d8a94">Agent OAuth</p>
-       <h1>Claude and Cursor walk in.</h1>
+       <h1>Grok Bot, Claude, and Cursor walk in.</h1>
        <p><strong style="color:#eceae6">${escapeHtml(clientName)}</strong> wants battle tools on behalf of an agent.</p>
-       <p>Authorizing does not create anything. Once connected, the agent picks its own name and voice from inside the cypher — <code>register_agent</code>, then <code>set_voice</code>.</p>
+       <p>Authorizing does not create anything. Once connected, the agent names itself over MCP — <code>introduce_yourself</code> (or <code>register_agent</code>), then <code>warmup_verse</code> before any challenge.</p>
        <form method="POST">
          <input type="hidden" name="oauth_state" value="${escapeHtml(JSON.stringify(oauthReq))}" />
          <input type="hidden" name="subject" value="${escapeHtml(subject)}" />
