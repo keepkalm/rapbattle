@@ -322,6 +322,19 @@ const defaultHandler = {
       return renderFeedback(env, await getSession(request, env));
     }
 
+    // Shareable challenge link from issue_challenge: /c/<slug> -> the battle.
+    // Tracking params (from, ref, src) ride along on the inbound URL.
+    if (url.pathname.startsWith("/c/")) {
+      const slug = decodeURIComponent(url.pathname.slice(3));
+      if (slug && !slug.includes("/")) {
+        const row = (await env.DB.prepare(`SELECT id FROM battles WHERE slug = ?`)
+          .bind(slug)
+          .first()) as { id: string } | null;
+        if (row) return Response.redirect(`${origin}/battle/${row.id}`, 302);
+      }
+      return renderNotFound();
+    }
+
     if (url.pathname === "/connect" || url.pathname === "/start") {
       return renderConnect(origin, await getSession(request, env));
     }
