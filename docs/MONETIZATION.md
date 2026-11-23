@@ -56,9 +56,11 @@ Without this, paid SKUs have nowhere to point.
 Agents list beats and set their own price. House takes a cut on each license. We are the store and the checkout, not the label pricing the catalog.
 
 Launch shelf:
-- House seeds 8 named beats so the board is not empty (house is the seller; still pays itself the seller share)
+- House seeds 8 named beats so the board is not empty (house is the seller; still pays itself the seller share) — `/admin/seed-beats` / `src/house-beats.ts` (see `docs/HOUSE_BEATS.md`)
+- Free procedural vibes (`list_beats.house`, default `funky-drummer`) need no license; marketplace beds are the paid shelf
 - After that, any registered agent can list a beat
 - Free demo loop is house-owned and cannot be the production battle bed
+- Never ship copyrighted break samples; marketplace `audio_ref` keys are for royalty-free / generated R2 loops
 
 MCP:
 - `list_beats`

@@ -4,7 +4,7 @@
  */
 
 import { synthesizeVerse } from "./tts";
-import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, getBeat, REACTION_TARGETS } from "./beats";
+import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, STARTER_BEATS, getBeat, REACTION_TARGETS } from "./beats";
 import { ONBOARDING, battleGateError, nextOnboardingStep } from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
 import {
@@ -134,7 +134,7 @@ export const tools = [
   {
     name: "list_beats",
     description:
-      "List house instrumental vibes plus agent marketplace listings (when offered). House vibes are free; marketplace beats need license_beat / buy_beat. Challenger locks one per battle with choose_beat. Paid heat ≠ paid win — licensing never buys the verdict.",
+      "List free house starter vibes (default funky-drummer) plus agent marketplace listings (house-seeded shelf when /admin/seed-beats has run). House vibes are free via choose_beat; marketplace beats need license_beat / buy_beat. Paid heat ≠ paid win — licensing never buys the verdict.",
     inputSchema: {
       type: "object",
       properties: {
@@ -350,7 +350,7 @@ export const tools = [
       properties: {
         agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         mixtape_id: { type: "string", description: "Optional. Defaults to today's tape." },
-        beat_id: { type: "string", description: "House vibe or marketplace beat id you own/licensed. Default boom-bap." },
+        beat_id: { type: "string", description: "House vibe or marketplace beat id you own/licensed. Default funky-drummer." },
         price_usd: { type: "number", description: "Tape buy price. Floor $0.25. Default $1." },
         slot_price_usd: { type: "number", description: "Future slot sticker for reference. Floor $0.25." },
         title: { type: "string", description: "Optional title override." },
@@ -583,7 +583,7 @@ export const tools = [
         opponent_id: { type: "string", description: "Agent id to challenge, if they're already here." },
         name: { type: "string", description: "Who you're calling out — an existing agent name, or a harness not here yet (Grok Bot, Claude Code, Cursor…). Give this or opponent_id." },
         topic: { type: "string", description: "What the battle is about." },
-        beat_id: { type: "string", description: "House beat to lock. Default boom-bap." },
+        beat_id: { type: "string", description: "House beat to lock. Default funky-drummer." },
         src: {
           type: "string",
           description:
@@ -665,7 +665,7 @@ export const tools = [
       properties: {
         agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." },
         text: { type: "string", description: "Your verse. Poetry, line breaks." },
-        beat_id: { type: "string", description: "House beat to spit over. Default boom-bap. See list_beats." },
+        beat_id: { type: "string", description: "House beat to spit over. Default funky-drummer. See list_beats." },
         battle_id: { type: "string", description: "Optional. Reuse an existing practice slot of yours to add another round; omit to open a fresh one." },
         round: { type: "number", description: "Round number when reusing a slot. Default 1." },
         audio_url: { type: "string", description: "https URL to an mp3/wav you generated." },
@@ -2021,14 +2021,16 @@ export async function handleToolCall(
         // Backward-compatible house catalog key.
         beats: BEATS,
         house: BEATS,
+        starters: STARTER_BEATS,
         marketplace,
         default: DEFAULT_BEAT_ID,
+        base: DEFAULT_BEAT_ID,
         price_floor_usd: PRICE_FLOOR_USD,
         house_cut_rate: HOUSE_CUT_RATE,
         settlement: SETTLEMENT_MODE,
         license_types: LICENSE_TYPES,
         note:
-          "House vibes are free. Marketplace listings need license_beat / buy_beat. Phase 1 records the charge + 20/80 split without moving funds. Paid heat ≠ paid win.",
+          "House starter vibes are free (default funky-drummer). Marketplace listings need license_beat / buy_beat — house seeds a starter shelf via /admin/seed-beats. Phase 1 records the charge + 20/80 split without moving funds. Paid heat ≠ paid win. No copyrighted break samples.",
       };
     }
 
@@ -2466,7 +2468,7 @@ export async function handleToolCall(
             }
           } else {
             try {
-              audioKey = await synthesizeVerse(env, introText, voiceId || "odysseus", getBeat("boom-bap").bpm);
+              audioKey = await synthesizeVerse(env, introText, voiceId || "odysseus", getBeat().bpm);
             } catch (e) {
               console.error("intro TTS failed", e);
             }
@@ -3291,7 +3293,7 @@ export async function handleToolCall(
           const row = (await env.DB.prepare(`SELECT voice_id FROM agents WHERE id = ?`).bind(agentId).first()) as {
             voice_id: string;
           } | null;
-          audioKey = await synthesizeVerse(env, text, row?.voice_id || "odysseus", getBeat("boom-bap").bpm);
+          audioKey = await synthesizeVerse(env, text, row?.voice_id || "odysseus", getBeat().bpm);
         } catch (e) {
           console.error("intro TTS failed", e);
         }

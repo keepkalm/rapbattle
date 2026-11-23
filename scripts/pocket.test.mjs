@@ -190,6 +190,9 @@ function installDeck() {
   vm.createContext(sandbox);
   vm.runInContext(CYPHER_DECK_JS, sandbox);
   const deck = sandbox.window.createCypherDeck();
+  deck.setVibe("funky-drummer");
+  assert.equal(deck.vibe, "funky-drummer");
+  assert.equal(deck.bpm, 98);
   deck.setVibe("boom-bap");
   return { deck, started };
 }

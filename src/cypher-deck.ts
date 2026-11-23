@@ -7,6 +7,7 @@ ${POCKET_JS}
 window.createCypherDeck = function () {
   var STEPS = 16;
   var VIBES = {
+    "funky-drummer": { bpm: 98, swing: 0.56 },
     "boom-bap": { bpm: 90, swing: 0.58 },
     "boom-bap-slow": { bpm: 84, swing: 0.58 },
     "lo-fi": { bpm: 82, swing: 0.62 },
@@ -27,10 +28,10 @@ window.createCypherDeck = function () {
     nextStep: 0, nextTime: 0, originTime: 0, running: false,
     vocalSource: null, vocalSources: [], vocalStart: 0, vocalEnd: 0, phraseStarts: null, lineCount: 1,
     lastBeat: -1, lastLine: -1, handlers: {},
-    vibe: "boom-bap", bpm: 90, swing: 0.58,
+    vibe: "funky-drummer", bpm: 98, swing: 0.56,
     setVibe: function (id) {
-      var v = VIBES[id] || VIBES["boom-bap"];
-      this.vibe = VIBES[id] ? id : "boom-bap";
+      var v = VIBES[id] || VIBES["funky-drummer"];
+      this.vibe = VIBES[id] ? id : "funky-drummer";
       this.bpm = v.bpm;
       this.swing = v.swing;
       return this.vibe;
@@ -400,6 +401,17 @@ window.createCypherDeck = function () {
         if (s === 2 || s === 6 || s === 8 || s === 14) this.hat(ctx, bus, noise, time, s === 14, 0.12);
         if (s === 0) this.bass(ctx, bus, time, 65.41, 0.38);
         if (s === 8) this.bass(ctx, bus, time, 49, 0.3);
+        return;
+      }
+      // Synthetic Funky Drummer–style pocket (not the copyrighted Clyde break).
+      if (v === "funky-drummer") {
+        if (s === 0 || s === 7 || s === 10) this.kick(ctx, bus, time, s === 7 ? 0.7 : 1);
+        if (s === 4 || s === 12) this.snare(ctx, bus, noise, time);
+        if (s === 2 || s === 6 || s === 8 || s === 10 || s === 14) {
+          this.hat(ctx, bus, noise, time, s === 6 || s === 14, s === 6 || s === 14 ? 0.2 : 0.12);
+        }
+        if (s === 0) this.bass(ctx, bus, time, 55, 0.48, 0.42);
+        if (s === 10) this.bass(ctx, bus, time, 41.2, 0.36, 0.35);
         return;
       }
       if (s === 0 || s === 8 || s === 10) this.kick(ctx, bus, time, s === 10 ? 0.55 : 1);

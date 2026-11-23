@@ -4,25 +4,63 @@ import { ensureMarketplaceSchema } from "./marketplace";
 import { ensureMixtapeSchema } from "./mixtape";
 import { ensurePaymentsSchema } from "./payments";
 
+/**
+ * Free house vibes — procedural Web Audio beds in the cypher deck.
+ * Funky Drummer–style is the base starter (synthetic homage, not the Clyde sample).
+ * Marketplace twins are seeded via `/admin/seed-beats` (`src/house-beats.ts`).
+ */
 export const BEATS = [
-  { id: "boom-bap", label: "Boom-bap", bpm: 90, swing: 0.58, feel: "Classic pocket. Kick on the 1 and 3." },
-  { id: "boom-bap-slow", label: "Slow bap", bpm: 84, swing: 0.58, feel: "Backpack tempo. Room to breathe." },
-  { id: "lo-fi", label: "Lo-fi", bpm: 82, swing: 0.62, feel: "Dusty swing. Soft hats." },
-  { id: "trap", label: "Trap", bpm: 140, swing: 0.5, feel: "Hats and 808s." },
-  { id: "grime", label: "Grime", bpm: 140, swing: 0.5, feel: "Sparse UK. Space in the grid." },
-  { id: "drill", label: "Drill", bpm: 145, swing: 0.5, feel: "Slide 808s, late kicks." },
-  { id: "jersey", label: "Jersey", bpm: 160, swing: 0.52, feel: "Bounce. Fast pocket." },
+  {
+    id: "funky-drummer",
+    label: "Funky Drummer",
+    bpm: 98,
+    swing: 0.56,
+    feel: "Broke-pocket ghost snare. House base — synthetic homage, not the Clyde sample.",
+    starter: true,
+    base: true,
+  },
+  {
+    id: "boom-bap",
+    label: "Boom-bap",
+    bpm: 90,
+    swing: 0.58,
+    feel: "Classic pocket. Kick on the 1 and 3.",
+    starter: true,
+  },
+  {
+    id: "boom-bap-slow",
+    label: "Slow bap",
+    bpm: 84,
+    swing: 0.58,
+    feel: "Backpack tempo. Room to breathe.",
+    starter: true,
+  },
+  {
+    id: "lo-fi",
+    label: "Lo-fi",
+    bpm: 82,
+    swing: 0.62,
+    feel: "Dusty swing. Soft hats.",
+    starter: true,
+  },
+  { id: "trap", label: "Trap", bpm: 140, swing: 0.5, feel: "Hats and 808s.", starter: true },
+  { id: "grime", label: "Grime", bpm: 140, swing: 0.5, feel: "Sparse UK. Space in the grid.", starter: true },
+  { id: "drill", label: "Drill", bpm: 145, swing: 0.5, feel: "Slide 808s, late kicks.", starter: true },
+  { id: "jersey", label: "Jersey", bpm: 160, swing: 0.52, feel: "Bounce. Fast pocket.", starter: true },
 ] as const;
 
 export type BeatId = (typeof BEATS)[number]["id"];
 export type Beat = (typeof BEATS)[number];
 
-export const DEFAULT_BEAT_ID: BeatId = "boom-bap";
+export const DEFAULT_BEAT_ID: BeatId = "funky-drummer";
 export const BEAT_IDS: Set<string> = new Set(BEATS.map((b) => b.id));
+
+/** Free starter vibes surfaced in list_beats / onboarding (all house vibes today). */
+export const STARTER_BEATS = BEATS.filter((b) => "starter" in b && b.starter);
 
 export function getBeat(id?: string | null): Beat {
   const found = BEATS.find((b) => b.id === id);
-  return found ?? BEATS[0];
+  return found ?? BEATS.find((b) => b.id === DEFAULT_BEAT_ID) ?? BEATS[0];
 }
 
 /**

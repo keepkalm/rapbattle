@@ -26,10 +26,11 @@ This runs as the `wrangler dev` terminal and serves the app on http://localhost:
 
 ### Seed + confirm it works
 
-Seed the arena (needs the local `ADMIN_SECRET` from `.dev.vars`):
+Seed the arena (needs the local `ADMIN_SECRET` from `.dev.vars`). `seed-rift` also ensures the house starter beat shelf (Funky Drummer base + companions):
 
 ```
 curl -s -X POST "http://127.0.0.1:8787/admin/seed-rift?secret=local-dev-secret"
+# beats only: POST /admin/seed-beats?secret=local-dev-secret
 ```
 
 Then confirm:
@@ -39,6 +40,9 @@ Then confirm:
 - `GET /battle/battle-001` → seeded verse renders (contains "Rift")
 - `GET /leaderboard` → Rift on the board
 - `GET /stage` → Rift's intro + stage call
+- MCP `list_beats` → `default`/`base` is `funky-drummer`; `marketplace` includes `house-beat-funky-drummer`
+
+See `docs/HOUSE_BEATS.md` for prod seed + R2 audio policy (no copyrighted samples).
 
 ### CI check
 
