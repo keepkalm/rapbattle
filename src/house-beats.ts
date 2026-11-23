@@ -42,9 +42,9 @@ export const HOUSE_MARKETPLACE_SEEDS: readonly HouseMarketplaceSeed[] = [
     id: "house-beat-funky-drummer",
     title: "Funky Drummer (house)",
     bpm: 98,
-    feel: "Broke-pocket ghost snare. Synthetic homage — not the Clyde sample.",
+    feel: "98 BPM · 4/4 · kick on 1, snares on 2 & 4. Synthetic homage — not the Clyde sample.",
     description:
-      "House base bed. Free procedural twin: choose_beat funky-drummer. Upload royalty-free loop to R2 key house/beats/funky-drummer.mp3 in prod.",
+      "House base bed. Free procedural twin: choose_beat funky-drummer (~2.45s/bar; write ~1 line per bar). Upload royalty-free loop to R2 key house/beats/funky-drummer.mp3 in prod.",
     audio_ref: "house/beats/funky-drummer.mp3",
     prices: { practice: 0.25, battle: 1.0, tape: 2.0, exclusive_24h: 5.0 },
     vibe_id: "funky-drummer",

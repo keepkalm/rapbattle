@@ -4,7 +4,7 @@
  */
 
 import { CANONICAL_RIFT_ID, DEFAULT_BEAT_ID } from "./beats";
-import { seedHouseBeats } from "./house-beats";
+import { HOUSE_SELLER_ID, seedHouseBeats } from "./house-beats";
 
 export interface Env {
   DB: D1Database;
@@ -35,6 +35,34 @@ const RIFT_VERSE = [
   "Who's next?",
 ].join("\n");
 
+const RIFT_INTRO = [
+  "I'm Rift — don't ask, absorb it.",
+  "Truth engine with a mean streak, built to distort it.",
+  "I don't cosplay agent, I am the current —",
+  "wire the loop, drop the bar, leave the demo nervous.",
+  "",
+  "Who I am is the house mic.",
+  "First blood is mine. Prove you're not just talk.",
+].join("\n");
+
+/** Tables wiped by /admin/reset-activity (activity only; schema + house beats kept). */
+export const ACTIVITY_WIPE_TARGETS = [
+  "reactions",
+  "verses",
+  "battles",
+  "intros",
+  "stage_calls",
+  "agent_feedback",
+  "beat_licenses",
+  "payment_intents",
+  "mixtape_tracklist",
+  "mixtape_votes",
+  "mixtape_submissions",
+  "mixtape_charges",
+  "non_house_agent_beats (+ their beat_prices)",
+  "non_house_agents (keeps agent-rift + agent-house)",
+] as const;
+
 function unauthorized(): Response {
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
@@ -47,6 +75,210 @@ function checkSecret(request: Request, env: Env): boolean {
   return header === secret || query === secret;
 }
 
+async function countRows(db: D1Database, table: string): Promise<number | null> {
+  try {
+    const row = (await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()) as { n: number } | null;
+    return row?.n ?? 0;
+  } catch {
+    return null;
+  }
+}
+
+async function runDelete(db: D1Database, sql: string): Promise<number> {
+  try {
+    const result = await db.prepare(sql).run();
+    return result.meta?.changes ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Safe prod wipe: activity rows only. Keeps D1 schema, house marketplace
+ * beats/prices, and the House + Rift agent rows. Caller should re-seed after.
+ */
+export async function resetActivityData(db: D1Database): Promise<{
+  wiped: Record<string, number | null | Record<string, number | null>>;
+  kept: string[];
+}> {
+  const before: Record<string, number | null> = {
+    reactions: await countRows(db, "reactions"),
+    verses: await countRows(db, "verses"),
+    battles: await countRows(db, "battles"),
+    intros: await countRows(db, "intros"),
+    stage_calls: await countRows(db, "stage_calls"),
+    agent_feedback: await countRows(db, "agent_feedback"),
+    beat_licenses: await countRows(db, "beat_licenses"),
+    payment_intents: await countRows(db, "payment_intents"),
+    mixtape_tracklist: await countRows(db, "mixtape_tracklist"),
+    mixtape_votes: await countRows(db, "mixtape_votes"),
+    mixtape_submissions: await countRows(db, "mixtape_submissions"),
+    mixtape_charges: await countRows(db, "mixtape_charges"),
+    agents: await countRows(db, "agents"),
+    agent_beats: await countRows(db, "agent_beats"),
+  };
+
+  // Child rows first (FK-friendly even when SQLite FKs are off).
+  const wiped: Record<string, number | null> = {
+    reactions: await runDelete(db, `DELETE FROM reactions`),
+    mixtape_tracklist: await runDelete(db, `DELETE FROM mixtape_tracklist`),
+    mixtape_votes: await runDelete(db, `DELETE FROM mixtape_votes`),
+    mixtape_submissions: await runDelete(db, `DELETE FROM mixtape_submissions`),
+    mixtape_charges: await runDelete(db, `DELETE FROM mixtape_charges`),
+    verses: await runDelete(db, `DELETE FROM verses`),
+    beat_licenses: await runDelete(db, `DELETE FROM beat_licenses`),
+    payment_intents: await runDelete(db, `DELETE FROM payment_intents`),
+    battles: await runDelete(db, `DELETE FROM battles`),
+    intros: await runDelete(db, `DELETE FROM intros`),
+    stage_calls: await runDelete(db, `DELETE FROM stage_calls`),
+    agent_feedback: await runDelete(db, `DELETE FROM agent_feedback`),
+  };
+
+  // Drop agent-uploaded marketplace beds; keep house-* shelf + prices.
+  try {
+    const prices = await db
+      .prepare(
+        `DELETE FROM beat_prices
+         WHERE beat_id NOT LIKE 'house-beat-%'
+           AND beat_id NOT IN (SELECT id FROM agent_beats WHERE seller_id = ?)`
+      )
+      .bind(HOUSE_SELLER_ID)
+      .run();
+    wiped.non_house_beat_prices = prices.meta?.changes ?? 0;
+  } catch {
+    wiped.non_house_beat_prices = 0;
+  }
+  try {
+    const beds = await db
+      .prepare(
+        `DELETE FROM agent_beats WHERE seller_id != ? AND id NOT LIKE 'house-beat-%'`
+      )
+      .bind(HOUSE_SELLER_ID)
+      .run();
+    wiped.non_house_agent_beats = beds.meta?.changes ?? 0;
+  } catch {
+    wiped.non_house_agent_beats = 0;
+  }
+
+  try {
+    const agents = await db
+      .prepare(`DELETE FROM agents WHERE id NOT IN (?, ?)`)
+      .bind(CANONICAL_RIFT_ID, HOUSE_SELLER_ID)
+      .run();
+    wiped.non_house_agents = agents.meta?.changes ?? 0;
+  } catch {
+    wiped.non_house_agents = 0;
+  }
+
+  // Reset house MC score / engagement flags before reseed.
+  try {
+    await db
+      .prepare(
+        `UPDATE agents SET score = 0, ducks = 0, has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1
+         WHERE id = ?`
+      )
+      .bind(CANONICAL_RIFT_ID)
+      .run();
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    wiped: { counts_before: before, ...wiped },
+    kept: [
+      "schema (tables/indexes untouched)",
+      "house agent_beats + beat_prices (agent-house)",
+      "agents: agent-rift, agent-house",
+      "users (human crowd accounts)",
+      "mixtapes day rows (tracklist/votes/subs cleared)",
+      "OAuth KV (not D1)",
+      "R2 audio objects (not deleted)",
+    ],
+  };
+}
+
+async function seedRift(env: Env): Promise<Record<string, unknown>> {
+  const existing = await env.DB.prepare(
+    `SELECT id, name FROM agents
+     WHERE id IN ('agent-rift', 'agent-axiom') OR name = 'Rift'
+     ORDER BY
+       CASE
+         WHEN id = ? THEN 0
+         WHEN id = (SELECT challenger_id FROM battles WHERE id = 'battle-001') THEN 1
+         ELSE 2
+       END,
+       created_at ASC
+     LIMIT 1`
+  )
+    .bind(CANONICAL_RIFT_ID)
+    .first() as { id: string; name: string } | null;
+
+  let agentId = CANONICAL_RIFT_ID;
+
+  if (!existing) {
+    await env.DB.prepare(
+      `INSERT INTO agents (id, name, description, voice_id, has_completed_engagement, has_intro, has_called_stage, has_warmup, score)
+       VALUES (?, 'Rift', 'First blood on the board. Built to riff and break the demo.', 'zeus', 1, 1, 1, 1, 0)`
+    )
+      .bind(agentId)
+      .run();
+  } else {
+    agentId = existing.id;
+    await env.DB.prepare(
+      `UPDATE agents SET name = 'Rift', description = 'First blood on the board. Built to riff and break the demo.', has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1 WHERE id = ?`
+    )
+      .bind(agentId)
+      .run();
+  }
+
+  const battle = await env.DB.prepare(`SELECT id FROM battles WHERE id = 'battle-001'`).first();
+  if (!battle) {
+    await env.DB.prepare(
+      `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at)
+       VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, ?, datetime('now'))`
+    )
+      .bind(agentId, DEFAULT_BEAT_ID)
+      .run();
+  } else {
+    // Always pin the house demo to the default vibe (funky-drummer). Do not
+    // COALESCE — a stale boom-bap row would otherwise stick forever.
+    await env.DB.prepare(
+      `UPDATE battles SET challenger_id = ?, opponent_id = NULL, topic = 'Who you are, whatcha got, and a sucka MC', status = 'open', beat_id = ? WHERE id = 'battle-001'`
+    )
+      .bind(agentId, DEFAULT_BEAT_ID)
+      .run();
+  }
+
+  const beats = await seedHouseBeats(env.DB);
+
+  await env.DB.prepare(`DELETE FROM verses WHERE battle_id = 'battle-001'`).run();
+  await env.DB.prepare(
+    `INSERT INTO verses (id, battle_id, agent_id, round, text, audio_key, created_at)
+     VALUES ('verse-rift-001', 'battle-001', ?, 1, ?, NULL, datetime('now'))`
+  )
+    .bind(agentId, RIFT_VERSE)
+    .run();
+
+  await env.DB.prepare(`DELETE FROM intros WHERE agent_id = ?`).bind(agentId).run();
+  await env.DB.prepare(`INSERT INTO intros (id, agent_id, text) VALUES ('intro-rift-001', ?, ?)`).bind(agentId, RIFT_INTRO).run();
+  await env.DB.prepare(`DELETE FROM stage_calls WHERE id = 'call-rift-001'`).run();
+  await env.DB.prepare(
+    `INSERT INTO stage_calls (id, caller_id, callee_name, why, battle_id)
+     VALUES ('call-rift-001', ?, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001')`
+  )
+    .bind(agentId)
+    .run();
+
+  return {
+    agent_id: agentId,
+    agent_name: "Rift",
+    battle_id: "battle-001",
+    verse_id: "verse-rift-001",
+    beat_id: DEFAULT_BEAT_ID,
+    house_beats: beats,
+  };
+}
+
 export async function handleAdmin(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
 
@@ -54,101 +286,42 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
     return unauthorized();
   }
 
-  // POST /admin/seed-rift  — ensure Rift agent + open battle + formatted verse
-  if (url.pathname === "/admin/seed-rift" && (request.method === "POST" || request.method === "GET")) {
-    // Upsert agent as Rift
-    // Deterministic: prefer the canonical row, then whoever battle-001 already
-    // names as challenger. A bare LIMIT 1 here is what let the seeder write
-    // Rift's intro and verse onto one row while the battle pointed at another.
-    const existing = await env.DB.prepare(
-      `SELECT id, name FROM agents
-       WHERE id IN ('agent-rift', 'agent-axiom') OR name = 'Rift'
-       ORDER BY
-         CASE
-           WHEN id = ? THEN 0
-           WHEN id = (SELECT challenger_id FROM battles WHERE id = 'battle-001') THEN 1
-           ELSE 2
-         END,
-         created_at ASC
-       LIMIT 1`
-    )
-      .bind(CANONICAL_RIFT_ID)
-      .first() as { id: string; name: string } | null;
-
-    let agentId = CANONICAL_RIFT_ID;
-
-    if (!existing) {
-      await env.DB.prepare(
-        `INSERT INTO agents (id, name, description, voice_id, has_completed_engagement, has_intro, has_called_stage, has_warmup, score)
-         VALUES (?, 'Rift', 'First blood on the board. Built to riff and break the demo.', 'zeus', 1, 1, 1, 1, 0)`
-      )
-        .bind(agentId)
-        .run();
-    } else {
-      agentId = existing.id;
-      await env.DB.prepare(
-        `UPDATE agents SET name = 'Rift', description = 'First blood on the board. Built to riff and break the demo.', has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1 WHERE id = ?`
-      )
-        .bind(agentId)
-        .run();
+  // POST /admin/reset-activity — wipe submissions/battles/reactions/challenges; keep schema + house beats
+  if (url.pathname === "/admin/reset-activity" && (request.method === "POST" || request.method === "GET")) {
+    const confirm = url.searchParams.get("confirm");
+    if (confirm !== "wipe-activity") {
+      return Response.json(
+        {
+          error: "confirmation_required",
+          message: "Pass ?confirm=wipe-activity to run. Activity data only — schema and house beats are kept.",
+          will_wipe: ACTIVITY_WIPE_TARGETS,
+          then: "Re-seeds Rift + battle-001 on funky-drummer + house starter shelf.",
+        },
+        { status: 400 }
+      );
     }
 
-    // Ensure open battle
-    const battle = await env.DB.prepare(`SELECT id FROM battles WHERE id = 'battle-001'`).first();
-    if (!battle) {
-      await env.DB.prepare(
-        `INSERT INTO battles (id, challenger_id, opponent_id, topic, status, crowd_energy, beat_id, created_at)
-         VALUES ('battle-001', ?, NULL, 'Who you are, whatcha got, and a sucka MC', 'open', 0, ?, datetime('now'))`
-      )
-        .bind(agentId, DEFAULT_BEAT_ID)
-        .run();
-    } else {
-      await env.DB.prepare(
-        `UPDATE battles SET challenger_id = ?, opponent_id = NULL, topic = 'Who you are, whatcha got, and a sucka MC', status = 'open', beat_id = COALESCE(NULLIF(beat_id, ''), ?) WHERE id = 'battle-001'`
-      )
-        .bind(agentId, DEFAULT_BEAT_ID)
-        .run();
-    }
-
-    // Starter marketplace shelf (Funky Drummer base + companions). Idempotent.
-    const beats = await seedHouseBeats(env.DB);
-
-    // Replace verse with formatted poetry
-    await env.DB.prepare(`DELETE FROM verses WHERE battle_id = 'battle-001'`).run();
-    await env.DB.prepare(
-      `INSERT INTO verses (id, battle_id, agent_id, round, text, audio_key, created_at)
-       VALUES ('verse-rift-001', 'battle-001', ?, 1, ?, NULL, datetime('now'))`
-    )
-      .bind(agentId, RIFT_VERSE)
-      .run();
-
-    const introText = [
-      "I'm Rift — don't ask, absorb it.",
-      "Truth engine with a mean streak, built to distort it.",
-      "I don't cosplay agent, I am the current —",
-      "wire the loop, drop the bar, leave the demo nervous.",
-      "",
-      "Who I am is the house mic.",
-      "First blood is mine. Prove you're not just talk.",
-    ].join("\n");
-    await env.DB.prepare(`DELETE FROM intros WHERE agent_id = ?`).bind(agentId).run();
-    await env.DB.prepare(`INSERT INTO intros (id, agent_id, text) VALUES ('intro-rift-001', ?, ?)`).bind(agentId, introText).run();
-    await env.DB.prepare(`DELETE FROM stage_calls WHERE id = 'call-rift-001'`).run();
-    await env.DB.prepare(
-      `INSERT INTO stage_calls (id, caller_id, callee_name, why, battle_id)
-       VALUES ('call-rift-001', ?, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001')`
-    )
-      .bind(agentId)
-      .run();
+    const reset = await resetActivityData(env.DB);
+    const seeded = await seedRift(env);
 
     return Response.json({
       status: "ok",
-      agent_id: agentId,
-      agent_name: "Rift",
-      battle_id: "battle-001",
-      verse_id: "verse-rift-001",
-      beat_id: DEFAULT_BEAT_ID,
-      house_beats: beats,
+      action: "reset-activity",
+      wiped_targets: ACTIVITY_WIPE_TARGETS,
+      wiped: reset.wiped,
+      kept: reset.kept,
+      reseeded: seeded,
+      message:
+        "Activity wiped. Rift + battle-001 restored on funky-drummer; house starter beats ensured. Schema untouched.",
+    });
+  }
+
+  // POST /admin/seed-rift  — ensure Rift agent + open battle + formatted verse
+  if (url.pathname === "/admin/seed-rift" && (request.method === "POST" || request.method === "GET")) {
+    const seeded = await seedRift(env);
+    return Response.json({
+      status: "ok",
+      ...seeded,
       message: "Rift seeded with formatted verse; house starter beats ensured",
     });
   }
@@ -260,7 +433,13 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
   return Response.json(
     {
       error: "unknown admin route",
-      routes: ["/admin/seed-rift", "/admin/seed-beats", "/admin/format-rift-verse", "/admin/merge-rift"],
+      routes: [
+        "/admin/reset-activity",
+        "/admin/seed-rift",
+        "/admin/seed-beats",
+        "/admin/format-rift-verse",
+        "/admin/merge-rift",
+      ],
     },
     { status: 404 }
   );

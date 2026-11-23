@@ -221,8 +221,12 @@ const SCRIPT = `
           return d.drop(buf, Math.max(1, lines.length), starts);
         });
       }).catch(function(){
-        d.stop();
-        resetCard(card, btn, label);
+        // /speak can 502 locally (Workers AI unbound) or briefly in prod — keep
+        // the cypher-deck bed running so Listen still demos the vibe. User hits
+        // Stop (or waits) to end; do not kill drums with the failed voice fetch.
+        if (btn.getAttribute("data-on") === "1" && label) {
+          label.textContent = "Beat only · Stop";
+        }
       });
     });
   });

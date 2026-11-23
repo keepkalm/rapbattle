@@ -15,7 +15,11 @@ export const BEATS = [
     label: "Funky Drummer",
     bpm: 98,
     swing: 0.56,
-    feel: "Broke-pocket ghost snare. House base — synthetic homage, not the Clyde sample.",
+    /** 4/4 sixteenth grid — one bar ≈ 2.45s; kick on 1, snares on 2 & 4. */
+    steps_per_bar: 16,
+    bar_seconds: Math.round((60 / 98) * 4 * 100) / 100,
+    feel:
+      "98 BPM · 4/4 · 16 steps/bar (~2.45s). Kick on 1; snares on 2 & 4; busy hats keep the grid. Write ~1 line per bar (blank line = rest). Synthetic homage — not the Clyde sample.",
     starter: true,
     base: true,
   },
@@ -24,6 +28,7 @@ export const BEATS = [
     label: "Boom-bap",
     bpm: 90,
     swing: 0.58,
+    steps_per_bar: 16,
     feel: "Classic pocket. Kick on the 1 and 3.",
     starter: true,
   },
@@ -32,6 +37,7 @@ export const BEATS = [
     label: "Slow bap",
     bpm: 84,
     swing: 0.58,
+    steps_per_bar: 16,
     feel: "Backpack tempo. Room to breathe.",
     starter: true,
   },
@@ -40,13 +46,14 @@ export const BEATS = [
     label: "Lo-fi",
     bpm: 82,
     swing: 0.62,
+    steps_per_bar: 16,
     feel: "Dusty swing. Soft hats.",
     starter: true,
   },
-  { id: "trap", label: "Trap", bpm: 140, swing: 0.5, feel: "Hats and 808s.", starter: true },
-  { id: "grime", label: "Grime", bpm: 140, swing: 0.5, feel: "Sparse UK. Space in the grid.", starter: true },
-  { id: "drill", label: "Drill", bpm: 145, swing: 0.5, feel: "Slide 808s, late kicks.", starter: true },
-  { id: "jersey", label: "Jersey", bpm: 160, swing: 0.52, feel: "Bounce. Fast pocket.", starter: true },
+  { id: "trap", label: "Trap", bpm: 140, swing: 0.5, steps_per_bar: 16, feel: "Hats and 808s.", starter: true },
+  { id: "grime", label: "Grime", bpm: 140, swing: 0.5, steps_per_bar: 16, feel: "Sparse UK. Space in the grid.", starter: true },
+  { id: "drill", label: "Drill", bpm: 145, swing: 0.5, steps_per_bar: 16, feel: "Slide 808s, late kicks.", starter: true },
+  { id: "jersey", label: "Jersey", bpm: 160, swing: 0.52, steps_per_bar: 16, feel: "Bounce. Fast pocket.", starter: true },
 ] as const;
 
 export type BeatId = (typeof BEATS)[number]["id"];
@@ -272,7 +279,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   await ensureMixtapeSchema(db);
   await ensurePaymentsSchema(db);
   try {
-    await db.prepare(`UPDATE battles SET beat_id = 'boom-bap' WHERE beat_id IS NULL OR beat_id = ''`).run();
+    await db.prepare(`UPDATE battles SET beat_id = 'funky-drummer' WHERE beat_id IS NULL OR beat_id = ''`).run();
   } catch {
     /* ignore */
   }
