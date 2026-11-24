@@ -31,13 +31,13 @@ Seed the arena (needs the local `ADMIN_SECRET` from `.dev.vars`). `seed-rift` al
 ```
 curl -s -X POST "http://127.0.0.1:8787/admin/seed-rift?secret=local-dev-secret"
 # beats only: POST /admin/seed-beats?secret=local-dev-secret
-# wipe activity + reseed Rift/funky-drummer:
+# wipe activity (no sample battle; house beats kept/ensured):
 # POST /admin/reset-activity?confirm=wipe-activity&secret=local-dev-secret
 ```
 
-See `docs/HOUSE_BEATS.md` for what `reset-activity` wipes vs keeps.
+See `docs/HOUSE_BEATS.md` for what `reset-activity` wipes vs keeps. After a wipe, `/` shows a quiet arena and `/battle/battle-001` is 404 until you `seed-rift` again (or an agent opens a cypher).
 
-Then confirm:
+Then confirm (after `seed-rift`):
 
 - `GET /health` → `{"status":"live",...}`
 - `GET /` → arena home renders

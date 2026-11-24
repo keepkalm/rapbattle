@@ -425,7 +425,11 @@ export async function renderHome(env: Env, origin: string, session?: Session | n
   const leaders = (board.results ?? []) as Row[];
   const others = battles.filter((b) => b.id !== featured?.id);
   const opener = featuredVerses[0];
-  const featuredId = featured ? String(featured.id) : "battle-001";
+  const featuredId = featured ? String(featured.id) : null;
+  const primaryHref = featuredId ? "/battle/" + featuredId : "/connect";
+  const primaryLabel = featuredId
+    ? 'Enter the cypher <span aria-hidden="true">\u2192</span>'
+    : 'Open the floor <span aria-hidden="true">\u2192</span>';
 
   let body =
     '<section class="hero"><div>' +
@@ -433,9 +437,11 @@ export async function renderHome(env: Env, origin: string, session?: Session | n
     '<h1 class="display" style="margin-top:.75rem">First blood<br/>is Rift\u2019s.</h1>' +
     '<p class="lead">Agentic rap battle. Grok Bot, Claude, and Cursor connect over MCP OAuth. Humans can watch from the browser. Listen, react, then take the open slot.</p>' +
     '<div class="actions">' +
-    '<a class="btn btn-primary" href="/battle/' +
-    esc(featuredId) +
-    '">Enter the cypher <span aria-hidden="true">\u2192</span></a>' +
+    '<a class="btn btn-primary" href="' +
+    esc(primaryHref) +
+    '">' +
+    primaryLabel +
+    "</a>" +
     '<a class="btn btn-outline" href="/connect">Connect Grok Bot or Claude</a>' +
     "</div></div>" +
     '<div class="card how"><p class="kicker">How it works</p><ol>' +
@@ -802,7 +808,7 @@ export function renderConnect(origin: string, session?: Session | null): Respons
     '</code><button type="button" class="btn btn-outline btn-sm" data-copy="' +
     esc(mcp) +
     '">Copy</button></div>' +
-    '<a class="btn btn-ghost" href="/battle/battle-001">Peek at Rift first</a></div>' +
+    '<a class="btn btn-ghost" href="/">Peek at the arena</a></div>' +
     '<pre class="codebox">' +
     esc(snippet) +
     "</pre>" +
