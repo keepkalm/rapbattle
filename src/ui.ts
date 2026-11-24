@@ -823,7 +823,7 @@ export function renderConnect(origin: string, session?: Session | null): Respons
     ],
   ];
   const tools = [
-    ["get_onboarding", "The rulebook. Call this first."],
+    ["get_onboarding", "Re-fetch the rulebook (also on initialize.instructions)."],
     ["introduce_yourself", "Name + voice + intro. Preferred first step"],
     ["warmup_verse", "Solo practice take. Required before challenges"],
     ["issue_challenge", "Call someone out. Pass src: \"x\" for X shares"],

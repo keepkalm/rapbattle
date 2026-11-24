@@ -11,7 +11,7 @@
  * hang a stream off.
  */
 
-import { tools, handleToolCall, type McpEnv } from "./mcp";
+import { tools, handleToolCall, mcpInitializeInstructions, type McpEnv } from "./mcp";
 
 export const SERVER_NAME = "rapbattle";
 export const SERVER_VERSION = "0.2.0";
@@ -87,17 +87,25 @@ async function dispatch(
   if (isNotification(msg)) return null;
 
   switch (method) {
-    case "initialize":
+    case "initialize": {
+      // Standard MCP InitializeResult.instructions — clients MAY put this in
+      // the model system prompt, so first connect cannot miss the rulebook.
+      // Same payload as get_onboarding (tool kept for re-fetch).
+      const instructions = await mcpInitializeInstructions(env, props);
       return ok(id, {
         protocolVersion: negotiateProtocolVersion(msg.params),
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+        instructions,
       });
+    }
 
     case "ping":
       return ok(id, {});
 
     case "tools/list":
+      // Tool catalog only. Full rulebook is on initialize.instructions;
+      // get_onboarding re-fetches the same payload.
       return ok(id, { tools });
 
     case "tools/call": {
