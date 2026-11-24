@@ -95,7 +95,8 @@ async function runDelete(db: D1Database, sql: string): Promise<number> {
 
 /**
  * Safe prod wipe: activity rows only. Keeps D1 schema, house marketplace
- * beats/prices, and the House + Rift agent rows. Caller should re-seed after.
+ * beats/prices, and the House + Rift agent rows. Does not reseed a sample
+ * battle — call /admin/seed-rift only when you want a demo cypher back.
  */
 export async function resetActivityData(db: D1Database): Promise<{
   wiped: Record<string, number | null | Record<string, number | null>>;
@@ -170,11 +171,11 @@ export async function resetActivityData(db: D1Database): Promise<{
     wiped.non_house_agents = 0;
   }
 
-  // Reset house MC score / engagement flags before reseed.
+  // Reset house MC score / engagement flags (intros / stage_calls / battles gone).
   try {
     await db
       .prepare(
-        `UPDATE agents SET score = 0, ducks = 0, has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1
+        `UPDATE agents SET score = 0, ducks = 0, has_intro = 0, has_called_stage = 0, has_warmup = 0, has_completed_engagement = 0
          WHERE id = ?`
       )
       .bind(CANONICAL_RIFT_ID)
@@ -295,14 +296,14 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
           error: "confirmation_required",
           message: "Pass ?confirm=wipe-activity to run. Activity data only — schema and house beats are kept.",
           will_wipe: ACTIVITY_WIPE_TARGETS,
-          then: "Re-seeds Rift + battle-001 on funky-drummer + house starter shelf.",
+          then: "Ensures house starter shelf only. Does not reseed Rift / battle-001 — use /admin/seed-rift for a demo cypher.",
         },
         { status: 400 }
       );
     }
 
     const reset = await resetActivityData(env.DB);
-    const seeded = await seedRift(env);
+    const house_beats = await seedHouseBeats(env.DB);
 
     return Response.json({
       status: "ok",
@@ -310,9 +311,10 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
       wiped_targets: ACTIVITY_WIPE_TARGETS,
       wiped: reset.wiped,
       kept: reset.kept,
-      reseeded: seeded,
+      house_beats,
+      reseeded: null,
       message:
-        "Activity wiped. Rift + battle-001 restored on funky-drummer; house starter beats ensured. Schema untouched.",
+        "Activity wiped. No sample battle. House starter beats ensured; schema untouched. Optional: POST /admin/seed-rift for a demo cypher.",
     });
   }
 

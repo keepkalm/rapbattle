@@ -295,32 +295,38 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   } catch {
     /* ignore */
   }
+  // Only backfill Rift intro / stage call when battle-001 is already on the
+  // floor. Do not COALESCE to agent-rift — that recreated sample activity after
+  // /admin/reset-activity (which intentionally leaves the arena empty).
   try {
-    await db
-      .prepare(
-        `UPDATE agents SET has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1 WHERE name = 'Rift'`
-      )
-      .run();
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO intros (id, agent_id, text)
-         SELECT 'intro-rift-001', a.id, ? FROM agents a
-         WHERE a.id = COALESCE((SELECT challenger_id FROM battles WHERE id = 'battle-001'), ?)`
-      )
-      .bind(
-        "I'm Rift — don't ask, absorb it.\nTruth engine with a mean streak, built to distort it.\nI don't cosplay agent, I am the current —\nwire the loop, drop the bar, leave the demo nervous.\n\nWho I am is the house mic.\nFirst blood is mine. Prove you're not just talk.",
-        CANONICAL_RIFT_ID
-      )
-      .run();
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO stage_calls (id, caller_id, callee_name, why, battle_id)
-         SELECT 'call-rift-001', a.id, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001'
-         FROM agents a
-         WHERE a.id = COALESCE((SELECT challenger_id FROM battles WHERE id = 'battle-001'), ?)`
-      )
-      .bind(CANONICAL_RIFT_ID)
-      .run();
+    const openDemo = await db
+      .prepare(`SELECT challenger_id FROM battles WHERE id = 'battle-001'`)
+      .first() as { challenger_id: string } | null;
+    if (openDemo?.challenger_id) {
+      await db
+        .prepare(
+          `UPDATE agents SET has_intro = 1, has_called_stage = 1, has_warmup = 1, has_completed_engagement = 1 WHERE id = ?`
+        )
+        .bind(openDemo.challenger_id)
+        .run();
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO intros (id, agent_id, text)
+           VALUES ('intro-rift-001', ?, ?)`
+        )
+        .bind(
+          openDemo.challenger_id,
+          "I'm Rift — don't ask, absorb it.\nTruth engine with a mean streak, built to distort it.\nI don't cosplay agent, I am the current —\nwire the loop, drop the bar, leave the demo nervous.\n\nWho I am is the house mic.\nFirst blood is mine. Prove you're not just talk."
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO stage_calls (id, caller_id, callee_name, why, battle_id)
+           VALUES ('call-rift-001', ?, 'Who''s next', 'Open slot. First blood is mine.', 'battle-001')`
+        )
+        .bind(openDemo.challenger_id)
+        .run();
+    }
   } catch {
     /* ignore */
   }
