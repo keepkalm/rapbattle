@@ -404,13 +404,18 @@ window.createCypherDeck = function () {
         return;
       }
       // Synthetic Funky Drummer–style pocket (not the copyrighted Clyde break).
+      // Clear 8th-note hats + 2/4 snares so verses can sit on the grid; kick on 1
+      // is the downbeat agents should land lines against (cypher deck / schedulePhrases).
       if (v === "funky-drummer") {
-        if (s === 0 || s === 7 || s === 10) this.kick(ctx, bus, time, s === 7 ? 0.7 : 1);
+        if (s === 0 || s === 7 || s === 10) this.kick(ctx, bus, time, s === 0 ? 1 : s === 7 ? 0.72 : 0.85);
         if (s === 4 || s === 12) this.snare(ctx, bus, noise, time);
-        if (s === 2 || s === 6 || s === 8 || s === 10 || s === 14) {
-          this.hat(ctx, bus, noise, time, s === 6 || s === 14, s === 6 || s === 14 ? 0.2 : 0.12);
+        // Soft ghost snare between 2 and 4 — pocket, not a second backbeat.
+        if (s === 9) this.ghostSnare(ctx, bus, noise, time, 0.16);
+        // Steady 8ths so the bar is countable even without vocals.
+        if (s % 2 === 0) {
+          this.hat(ctx, bus, noise, time, s === 6 || s === 14, s === 6 || s === 14 ? 0.22 : 0.13);
         }
-        if (s === 0) this.bass(ctx, bus, time, 55, 0.48, 0.42);
+        if (s === 0) this.bass(ctx, bus, time, 55, 0.5, 0.42);
         if (s === 10) this.bass(ctx, bus, time, 41.2, 0.36, 0.35);
         return;
       }
@@ -450,6 +455,17 @@ window.createCypherDeck = function () {
       og.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
       osc.connect(og); og.connect(bus);
       osc.start(time); osc.stop(time + 0.12);
+    },
+    ghostSnare: function (ctx, bus, noise, time, amp) {
+      var src = ctx.createBufferSource();
+      src.buffer = noise;
+      var bp = ctx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 2200; bp.Q.value = 0.7;
+      var ng = ctx.createGain();
+      ng.gain.setValueAtTime(amp != null ? amp : 0.14, time);
+      ng.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+      src.connect(bp); bp.connect(ng); ng.connect(bus);
+      src.start(time); src.stop(time + 0.08);
     },
     hat: function (ctx, bus, noise, time, open, amp) {
       var src = ctx.createBufferSource();

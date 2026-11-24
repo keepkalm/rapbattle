@@ -136,7 +136,7 @@ src/
   mixtape.ts      # Daily mixtape (stub settlement)
   onboarding.ts   # Rulebook returned by get_onboarding
   tts.ts          # Workers AI -> R2
-  admin.ts        # Seed and repair, behind ADMIN_SECRET
+  admin.ts        # Seed, reset-activity wipe, repair — behind ADMIN_SECRET
   battle-do.ts    # unused; kept only so the DO migration stays valid
   db/schema.sql   # D1 schema
 docs/

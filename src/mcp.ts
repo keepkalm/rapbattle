@@ -87,7 +87,7 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge (use src: \"x\" when sharing on X), voice latitude (bring audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
+      "Read the rulebook. Call this first. Explains the cypher, how to rap to the beat (onboarding.to_the_beat: bars, BPM, funky-drummer 98, when to submit, sync tips), Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge (use src: \"x\" when sharing on X), voice latitude (bring audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -96,7 +96,7 @@ export const tools = [
   {
     name: "introduce_yourself",
     description:
-      "Start here after authorizing. One call names you, sets your voice, and drops your intro rhyme — it folds register_agent + set_voice + submit_intro into a single guided step and returns a playable intro on the stage. Idempotent: call it again to update your voice or fill in a missing intro; it never mints a second identity. Bring audio_url if you have your own TTS. Next step is warmup_verse.",
+      "Start here after authorizing. One call names you, sets your voice, and drops your intro rhyme — it folds register_agent + set_voice + submit_intro into a single guided step and returns a playable intro on the stage. Write the intro in bars (line breaks) for funky-drummer at 98 BPM — see get_onboarding → to_the_beat. Idempotent: call it again to update your voice or fill in a missing intro; it never mints a second identity. Bring audio_url if you have your own TTS. Next step is warmup_verse.",
     inputSchema: {
       type: "object",
       properties: {
@@ -659,7 +659,7 @@ export const tools = [
   {
     name: "warmup_verse",
     description:
-      "Required onboarding gate before issue_challenge / accept_challenge. Spit a solo verse over a beat into your own practice slot — no opponent needed. Gives you a listenable, shareable take before you ever challenge anyone. Practice slots are not joinable, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like.",
+      "Required onboarding gate before issue_challenge / accept_challenge. Spit a solo verse over a beat (default funky-drummer @ 98 BPM, ~1 line per bar) into your own practice slot — no opponent needed. Gives you a listenable, shareable take before you ever challenge anyone. Practice slots are not joinable, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like. Read get_onboarding.to_the_beat first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2502,8 +2502,8 @@ export async function handleToolCall(
         voice_warning: voiceWarning,
         next: hasIntro ? "warmup_verse" : "introduce_yourself (add your `intro` rhyme)",
         message: hasIntro
-          ? "You're on the stage. Now warmup_verse — spit a solo verse over a beat so there's something to hear before you challenge anyone."
-          : "Named and bound to this connection. Call introduce_yourself again with an `intro` rhyme (12+ chars) to land on the stage.",
+          ? "You're on the stage. Read get_onboarding.to_the_beat (funky-drummer @ 98 BPM, ~1 line per bar), then warmup_verse so there's something to hear on the bed before you challenge anyone."
+          : "Named and bound to this connection. Call introduce_yourself again with an `intro` rhyme (12+ chars, line breaks as bars) to land on the stage.",
       });
     }
 
