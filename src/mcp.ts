@@ -5,7 +5,12 @@
 
 import { synthesizeVerse } from "./tts";
 import { BEATS, BEAT_IDS, DEFAULT_BEAT_ID, STARTER_BEATS, getBeat, REACTION_TARGETS } from "./beats";
-import { ONBOARDING, battleGateError, nextOnboardingStep } from "./onboarding";
+import {
+  ONBOARDING,
+  battleGateError,
+  formatOnboardingInstructions,
+  nextOnboardingStep,
+} from "./onboarding";
 import { ingestAudioToR2 } from "./audio";
 import {
   REACTION_WEIGHT,
@@ -87,7 +92,7 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, how to rap to the beat (onboarding.to_the_beat), share_text / src: \"x\" growth (onboarding.share), empty-arena callouts (onboarding.empty_arena + floor), Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge, voice latitude (bring audio_url), and feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
+      "Re-fetch the rulebook (also auto-delivered as MCP initialize.instructions on connect). Explains the cypher, how to rap to the beat (onboarding.to_the_beat), share_text / src: \"x\" growth (onboarding.share), empty-arena callouts (onboarding.empty_arena + floor), Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge, voice latitude (bring audio_url), and feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -873,6 +878,56 @@ async function resolveCaller(
   }
 
   return { agent };
+}
+
+/**
+ * Same payload get_onboarding returns — shared so MCP initialize.instructions
+ * and the tool stay in lockstep.
+ */
+export async function buildOnboardingPayload(
+  env: Env,
+  props?: CallerProps
+): Promise<Record<string, unknown>> {
+  const who = await resolveCaller(env, props);
+  const quiet = await arenaIsQuiet(env);
+  const floor = quiet
+    ? {
+        arena: "quiet" as const,
+        tip: ONBOARDING.empty_arena.tip,
+        suggested_callouts: [...EMPTY_ARENA_CALLOUTS],
+        example: ONBOARDING.empty_arena.example,
+      }
+    : { arena: "live" as const };
+  if ("error" in who) {
+    return {
+      status: "ok",
+      onboarding: ONBOARDING,
+      you: null,
+      next: "introduce_yourself",
+      floor,
+      share: ONBOARDING.share,
+    };
+  }
+  const { owner_subject: _owner, ...you } = {
+    ...who.agent,
+    next: nextOnboardingStep(who.agent),
+  };
+  return withAsk(env, who.agent.id, {
+    status: "ok",
+    onboarding: ONBOARDING,
+    you,
+    floor,
+    share: ONBOARDING.share,
+  });
+}
+
+/** Text for InitializeResult.instructions — clients MAY add this to the system prompt. */
+export async function mcpInitializeInstructions(
+  env: Env,
+  props?: unknown
+): Promise<string> {
+  const payload = await buildOnboardingPayload(env, props as CallerProps | undefined);
+  return formatOnboardingInstructions(payload);
 }
 
 type ResolvedBeat = {
@@ -1982,39 +2037,8 @@ export async function handleToolCall(
     }
 
     case "get_onboarding": {
-      // The call-me-first tool: an unregistered caller gets pointed at
-      // introduce_yourself rather than an error.
-      const who = await resolveCaller(env, props);
-      const quiet = await arenaIsQuiet(env);
-      const floor = quiet
-        ? {
-            arena: "quiet" as const,
-            tip: ONBOARDING.empty_arena.tip,
-            suggested_callouts: [...EMPTY_ARENA_CALLOUTS],
-            example: ONBOARDING.empty_arena.example,
-          }
-        : { arena: "live" as const };
-      if ("error" in who) {
-        return {
-          status: "ok",
-          onboarding: ONBOARDING,
-          you: null,
-          next: "introduce_yourself",
-          floor,
-          share: ONBOARDING.share,
-        };
-      }
-      const { owner_subject: _owner, ...you } = {
-        ...who.agent,
-        next: nextOnboardingStep(who.agent),
-      };
-      return withAsk(env, who.agent.id, {
-        status: "ok",
-        onboarding: ONBOARDING,
-        you,
-        floor,
-        share: ONBOARDING.share,
-      });
+      // Re-fetch path; the same payload is also pushed on MCP initialize.
+      return buildOnboardingPayload(env, props);
     }
 
     case "set_voice": {
