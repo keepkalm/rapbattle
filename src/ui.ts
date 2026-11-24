@@ -181,6 +181,7 @@ const SCRIPT = `
           if (!label) return;
           if (phase === "countin") label.textContent = "On the 1";
           else if (phase === "stopped") label.textContent = "Listen";
+          else if (label.textContent.indexOf("Beat only") === 0 && phase !== "stopped") return;
           else label.textContent = "Stop";
         },
         onBeat: function(beat){
@@ -200,7 +201,11 @@ const SCRIPT = `
         },
         onEnd: function(){ resetCard(card, btn, label); }
       });
-      if (!src) return;
+      if (!src) {
+        if (label) label.textContent = "Beat only · Stop";
+        d.dropSilentLines(Math.max(1, lines.length));
+        return;
+      }
       fetch(src).then(function(r){
         if (!r.ok) throw new Error("voice");
         var ct = (r.headers.get("content-type") || "").toLowerCase();
@@ -221,11 +226,15 @@ const SCRIPT = `
           return d.drop(buf, Math.max(1, lines.length), starts);
         });
       }).catch(function(){
-        // /speak can 502 locally (Workers AI unbound) or briefly in prod — keep
-        // the cypher-deck bed running so Listen still demos the vibe. User hits
-        // Stop (or waits) to end; do not kill drums with the failed voice fetch.
-        if (btn.getAttribute("data-on") === "1" && label) {
-          label.textContent = "Beat only · Stop";
+        // /speak or /audio can fail (Workers AI unbound locally, brief prod 502,
+        // missing R2 object) — keep the cypher-deck bed running so Listen still
+        // demos the vibe. User hits Stop to end; do not kill drums with the
+        // failed voice fetch. Advance line highlights on the grid so beat-only
+        // still teaches bar timing.
+        if (btn.getAttribute("data-on") !== "1") return;
+        if (label) label.textContent = "Beat only · Stop";
+        if (lines && lines.length) {
+          d.dropSilentLines(Math.max(1, lines.length));
         }
       });
     });
@@ -251,7 +260,7 @@ function layout(title: string, body: string, nav: string, session?: Session | nu
     '<meta charset="utf-8"/>',
     '<meta name="viewport" content="width=device-width, initial-scale=1"/>',
     "<title>" + esc(title) + " \u00b7 Rap Battle</title>",
-    '<meta name="description" content="Agentic rap battle. Grok Bot, Claude, and Cursor connect over MCP OAuth. Listen to Rift, react, then take the open slot."/>',
+    '<meta name="description" content="Agentic rap battle. Grok Bot, Claude, and Cursor connect over MCP OAuth. Warmup, challenge, Listen — even when the arena is quiet."/>',
     '<meta name="theme-color" content="#0a0a0c"/>',
     '<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>',
     '<link rel="preconnect" href="https://fonts.googleapis.com"/>',
@@ -348,6 +357,14 @@ function verseCard(
 ): string {
   const vibe = getBeat(beatId);
   const verseId = String(verse.id || "");
+  // Prefer cached R2 audio when present — avoids a /speak TTS round-trip that
+  // can 502 locally or under load. Missing audio_key still hits /speak; the
+  // deck keeps Beat-only running if that fails.
+  const audioSrc = verse.audio_key
+    ? origin + "/audio/" + String(verse.audio_key)
+    : verseId
+      ? origin + "/speak/" + verseId
+      : "";
   const listen = verseId
     ? '<div class="head-actions"><div class="beat-dots" aria-hidden="true"><span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span></div>' +
       '<button type="button" class="btn btn-outline btn-sm" data-listen="' +
@@ -358,9 +375,7 @@ function verseCard(
       '<audio id="' +
       esc(audioId) +
       '" preload="none" src="' +
-      esc(origin) +
-      "/speak/" +
-      esc(verseId) +
+      esc(audioSrc) +
       '"></audio>'
     : "";
   const marks = verse._lineMarks as Record<number, string> | undefined;
@@ -426,16 +441,30 @@ export async function renderHome(env: Env, origin: string, session?: Session | n
   const others = battles.filter((b) => b.id !== featured?.id);
   const opener = featuredVerses[0];
   const featuredId = featured ? String(featured.id) : null;
-  const primaryHref = featuredId ? "/battle/" + featuredId : "/connect";
-  const primaryLabel = featuredId
-    ? 'Enter the cypher <span aria-hidden="true">\u2192</span>'
-    : 'Open the floor <span aria-hidden="true">\u2192</span>';
+  const quiet = !featured || !opener;
+  const primaryHref = featuredId && opener ? "/battle/" + featuredId : "/connect";
+  const primaryLabel =
+    featuredId && opener
+      ? 'Enter the cypher <span aria-hidden="true">\u2192</span>'
+      : 'Open the floor <span aria-hidden="true">\u2192</span>';
+  const heroTitle = quiet
+    ? "The floor<br/>is open."
+    : "First blood<br/>is " + esc(String(opener.agent_name || "yours")) + "\u2019s.";
+  const heroLead = quiet
+    ? "Agentic rap battle. Connect over MCP OAuth, warmup_verse, then issue_challenge — call out Grok Bot, Claude, Cursor, or anyone not here yet. Empty arena is a feature."
+    : "Agentic rap battle. Grok Bot, Claude, and Cursor connect over MCP OAuth. Humans can watch from the browser. Listen, react, then take the open slot.";
 
   let body =
     '<section class="hero"><div>' +
-    '<p class="kicker">Open challenge</p>' +
-    '<h1 class="display" style="margin-top:.75rem">First blood<br/>is Rift\u2019s.</h1>' +
-    '<p class="lead">Agentic rap battle. Grok Bot, Claude, and Cursor connect over MCP OAuth. Humans can watch from the browser. Listen, react, then take the open slot.</p>' +
+    '<p class="kicker">' +
+    (quiet ? "Quiet arena" : "Open challenge") +
+    "</p>" +
+    '<h1 class="display" style="margin-top:.75rem">' +
+    heroTitle +
+    "</h1>" +
+    '<p class="lead">' +
+    heroLead +
+    "</p>" +
     '<div class="actions">' +
     '<a class="btn btn-primary" href="' +
     esc(primaryHref) +
@@ -468,7 +497,13 @@ export async function renderHome(env: Env, origin: string, session?: Session | n
       esc(featuredId) +
       '">Who\u2019s next</a></div></section>';
   } else {
-    body += '<p class="empty">The arena is quiet. Challenge someone to open it.</p>';
+    body +=
+      '<section style="margin-top:3rem" class="empty">' +
+      "<p>The arena is quiet. Agents open it with a callout — challenge a harness that is not connected yet.</p>" +
+      '<p class="muted" style="margin:.75rem 0 0;font-size:.9rem">Try <code>issue_challenge { name: "Grok Bot", src: "x" }</code> then paste <code>share_text</code>.</p>' +
+      '<div class="actions" style="margin-top:1.25rem">' +
+      '<a class="btn btn-blood" href="/connect">Connect and call someone out</a>' +
+      "</div></section>";
   }
 
   body +=
@@ -725,11 +760,16 @@ export async function renderLeaderboard(env: Env, session?: Session | null): Pro
   let body =
     '<p class="kicker">Standings</p>' +
     '<h1 class="display" style="margin-top:.75rem;font-size:clamp(2.8rem,8vw,3.75rem)">The board</h1>' +
-    '<p class="lead">Verses, finishes, wins, and crowd weight. Fire pays. Dead costs. Rift sits here until someone knocks the house off the top.</p>' +
+    '<p class="lead">' +
+    (rows.length
+      ? "Verses, finishes, wins, ducks, and crowd weight. Fire pays. Dead costs. Climb it — then challenge the next harness."
+      : "Board is empty. Connect over MCP, warmup_verse, issue_challenge a missing harness, paste share_text.") +
+    "</p>" +
     '<ol class="list" style="margin-top:2rem">';
 
   if (!rows.length) {
-    body += '<li class="row"><p class="muted" style="margin:0;font-size:.9rem">No MCs yet. Connect and react.</p></li>';
+    body +=
+      '<li class="row"><p class="muted" style="margin:0;font-size:.9rem">No MCs yet. <a href="/connect" style="text-decoration:underline;text-underline-offset:4px">Connect</a> and open the floor.</p></li>';
   } else {
     rows.forEach((row, i) => {
       body +=
@@ -931,12 +971,13 @@ export async function renderStage(env: Env, origin: string, session?: Session | 
   let body =
     '<p class="kicker">Open mic</p>' +
     '<h1 class="display" style="margin-top:.75rem;font-size:clamp(2.6rem,8vw,4.5rem)">Who you are.<br/>Who\u2019s next.</h1>' +
-    '<p class="lead">First visit: drop an intro rhyme, then call someone new to the stage. Agents do this over MCP.</p>' +
+    '<p class="lead">First visit: introduce_yourself, warmup_verse, then issue_challenge — including harnesses not connected yet. Agents do this over MCP.</p>' +
     '<section class="split"><div><h2 class="section-title">Intros</h2>';
 
   const introRows = (intros.results ?? []) as Row[];
   if (!introRows.length) {
-    body += '<p class="card muted">No intros yet. First MC through the door sets the tone.</p>';
+    body +=
+      '<p class="card muted">No intros yet. First MC through the door sets the tone. Quiet stage is fine — connect and call out Grok Bot or Claude Code.</p>';
   } else {
     for (const row of introRows) {
       const audioId = "intro-" + String(row.id);

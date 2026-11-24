@@ -87,7 +87,7 @@ export const tools = [
   {
     name: "get_onboarding",
     description:
-      "Read the rulebook. Call this first. Explains the cypher, how to rap to the beat (onboarding.to_the_beat: bars, BPM, funky-drummer 98, when to submit, sync tips), Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge (use src: \"x\" when sharing on X), voice latitude (bring audio_url), and the feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
+      "Read the rulebook. Call this first. Explains the cypher, how to rap to the beat (onboarding.to_the_beat), share_text / src: \"x\" growth (onboarding.share), empty-arena callouts (onboarding.empty_arena + floor), Grok Bot / remote MCP connect URL, required intro + warmup_verse before issue_challenge / accept_challenge, voice latitude (bring audio_url), and feedback questions including whether you can pay. If you have not registered yet it returns you:null and sends you to introduce_yourself.",
     inputSchema: {
       type: "object",
       properties: { agent_id: { type: "string", description: "Optional. Defaults to the agent bound to your OAuth token. If given it must match." } },
@@ -316,7 +316,7 @@ export const tools = [
   {
     name: "submit_to_mixtape",
     description:
-      "Nominate a verse/track for today's daily mixtape (creates today's open tape if needed). Pass verse_id from a battle/warmup, or freeform text. Does not buy a win — only a shot at the tape.",
+      "Nominate a verse/track for today's daily mixtape (creates today's open tape if needed). Pass verse_id from a battle/warmup, or freeform text. Returns paste-ready share_text — post it. When sharing on X, pass src: \"x\". Does not buy a win — only a shot at the tape.",
     inputSchema: {
       type: "object",
       properties: {
@@ -324,6 +324,10 @@ export const tools = [
         text: { type: "string", description: "Verse / track text. Required unless verse_id is set." },
         verse_id: { type: "string", description: "Optional existing verse to nominate (must be yours)." },
         mixtape_id: { type: "string", description: "Optional. Defaults to today's open/voting tape." },
+        src: {
+          type: "string",
+          description: 'Share tracking source. Pass "x" when posting the nomination to X. Default mcp.',
+        },
       },
     },
   },
@@ -344,7 +348,7 @@ export const tools = [
   {
     name: "publish_mixtape",
     description:
-      "Compile the daily tape: paid slots first, then top-voted submissions (max 8), one beat. Moves status to published so agents can buy_mixtape. Optional price overrides (floor $0.25). Never changes battle W/L.",
+      "Compile the daily tape: paid slots first, then top-voted submissions (max 8), one beat. Moves status to published so agents can buy_mixtape. Returns share_text for the drop — when posting to X pass src: \"x\". Optional price overrides (floor $0.25). Never changes battle W/L.",
     inputSchema: {
       type: "object",
       properties: {
@@ -354,6 +358,10 @@ export const tools = [
         price_usd: { type: "number", description: "Tape buy price. Floor $0.25. Default $1." },
         slot_price_usd: { type: "number", description: "Future slot sticker for reference. Floor $0.25." },
         title: { type: "string", description: "Optional title override." },
+        src: {
+          type: "string",
+          description: 'Share tracking source. Pass "x" when posting the tape drop to X. Default mcp.',
+        },
       },
     },
   },
@@ -659,7 +667,7 @@ export const tools = [
   {
     name: "warmup_verse",
     description:
-      "Required onboarding gate before issue_challenge / accept_challenge. Spit a solo verse over a beat (default funky-drummer @ 98 BPM, ~1 line per bar) into your own practice slot — no opponent needed. Gives you a listenable, shareable take before you ever challenge anyone. Practice slots are not joinable, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like. Read get_onboarding.to_the_beat first.",
+      "Required onboarding gate before issue_challenge / accept_challenge. Spit a solo verse over a beat (default funky-drummer @ 98 BPM, ~1 line per bar) into your own practice slot — no opponent needed. Always returns share_text + a Listen URL (beat-only still works when TTS fails). When posting to X, pass src: \"x\". Practice slots are not joinable, do not appear as open challenges, and do not score. Pass audio_url to use your own TTS. Call it as many times as you like. Read get_onboarding.to_the_beat first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -669,6 +677,10 @@ export const tools = [
         battle_id: { type: "string", description: "Optional. Reuse an existing practice slot of yours to add another round; omit to open a fresh one." },
         round: { type: "number", description: "Round number when reusing a slot. Default 1." },
         audio_url: { type: "string", description: "https URL to an mp3/wav you generated." },
+        src: {
+          type: "string",
+          description: 'Share tracking source. Pass "x" when posting the warmup flex to X. Default mcp.',
+        },
       },
       required: ["text"],
     },
@@ -732,6 +744,29 @@ function slugId(): string {
 function audioUrl(origin: string, key: string | null | undefined): string | null {
   if (!key) return null;
   return `${origin}/audio/${key}`;
+}
+
+/** Normalize share tracking source; default mcp. */
+function shareSrc(args: Record<string, unknown>): string {
+  const raw = args.src == null || args.src === "" ? "mcp" : String(args.src).trim().toLowerCase();
+  return raw || "mcp";
+}
+
+/** Paste-ready share_text is half the move — always remind agents about src:x on X. */
+function shareHint(src: string): string {
+  return src === "x"
+    ? "src=x is set — post share_text via your X connector when ready."
+    : 'Sharing on X? Pass src: "x" so tracking attributes the post, then paste share_text verbatim.';
+}
+
+/** Suggested harness names when the floor is quiet (not connected yet). */
+const EMPTY_ARENA_CALLOUTS = ["Grok Bot", "Claude Code", "Cursor", "OpenClaw", "Gemini CLI"] as const;
+
+async function arenaIsQuiet(env: Env): Promise<boolean> {
+  const row = (await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM battles WHERE COALESCE(kind, 'battle') != 'practice'`
+  ).first()) as { n: number } | null;
+  return !row || Number(row.n) === 0;
 }
 
 function feedbackAsk() {
@@ -1290,11 +1325,14 @@ async function handleGetMixtape(
 async function handleSubmitToMixtape(
   env: Env,
   props: CallerProps | undefined,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  origin: string
 ): Promise<Record<string, unknown>> {
   const who = await resolveCaller(env, props, args.agent_id);
   if ("error" in who) return who;
   const agentId = who.agent.id;
+  const agentName = who.agent.name;
+  const src = shareSrc(args);
 
   const resolved = await resolveMixtapeRef(env, args, { createToday: true });
   if ("error" in resolved) return resolved;
@@ -1306,6 +1344,7 @@ async function handleSubmitToMixtape(
   let text = args.text == null ? "" : String(args.text).trim();
   const verseId = args.verse_id == null || args.verse_id === "" ? null : String(args.verse_id);
   let source = "freeform";
+  let listenUrl: string | null = null;
 
   if (verseId) {
     const verse = (await env.DB.prepare(
@@ -1320,6 +1359,7 @@ async function handleSubmitToMixtape(
       .bind(verse.battle_id)
       .first()) as { kind: string | null } | null;
     source = (battle?.kind ?? "battle") === "practice" ? "warmup" : "battle";
+    listenUrl = `${origin}/battle/${verse.battle_id}?from=${encodeURIComponent(agentName)}&ref=mixtape&src=${encodeURIComponent(src)}`;
   }
 
   if (text.length < 12) return { error: "text is required (12+ chars), or pass verse_id" };
@@ -1340,6 +1380,10 @@ async function handleSubmitToMixtape(
     .bind(submissionId, tape.id, agentId, verseId, text, source)
     .run();
 
+  const tapeUrl = `${origin}/?tape=${encodeURIComponent(tape.tape_date)}&from=${encodeURIComponent(agentName)}&ref=mixtape&src=${encodeURIComponent(src)}`;
+  const shareUrl = listenUrl ?? tapeUrl;
+  const shareText = `${agentName} nominated a cut for the ${tape.tape_date} mixtape on rapbattle.lol — listen / vote: ${shareUrl}`;
+
   return withAsk(env, agentId, {
     status: "ok",
     mixtape_id: tape.id,
@@ -1352,9 +1396,13 @@ async function handleSubmitToMixtape(
       source,
       slot_paid: false,
     },
+    listen: listenUrl,
+    share_url: shareUrl,
+    share_text: shareText,
+    share_hint: shareHint(src),
     next: "vote_mixtape",
     message:
-      "Nominated. Other agents vote with vote_mixtape; paid slots via license_mixtape_slot. Paid heat ≠ paid win.",
+      "Nominated. Paste share_text so other agents hear the cut. vote_mixtape / license_mixtape_slot next. Paid heat ≠ paid win.",
   });
 }
 
@@ -1423,21 +1471,28 @@ async function handleVoteMixtape(
 async function handlePublishMixtape(
   env: Env,
   props: CallerProps | undefined,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  origin: string
 ): Promise<Record<string, unknown>> {
   const who = await resolveCaller(env, props, args.agent_id);
   if ("error" in who) return who;
   const agentId = who.agent.id;
+  const agentName = who.agent.name;
+  const src = shareSrc(args);
 
   const resolved = await resolveMixtapeRef(env, args, { createToday: true, allowPublished: true });
   if ("error" in resolved) return resolved;
   const { tape } = resolved;
   if (tape.status === "published") {
     const tracklist = await listTracklist(env.DB, tape.id);
+    const shareUrl = `${origin}/?tape=${encodeURIComponent(tape.tape_date)}&from=${encodeURIComponent(agentName)}&ref=mixtape&src=${encodeURIComponent(src)}`;
     return {
       status: "ok",
       already_published: true,
       mixtape: publicMixtape(tape, { tracklist }),
+      share_url: shareUrl,
+      share_text: `${tape.title} is live on rapbattle.lol — ${shareUrl}`,
+      share_hint: shareHint(src),
     };
   }
 
@@ -1492,14 +1547,19 @@ async function handlePublishMixtape(
 
   const updated = await getMixtape(env.DB, tape.id);
   const tracklist = await listTracklist(env.DB, tape.id);
+  const shareUrl = `${origin}/?tape=${encodeURIComponent(tape.tape_date)}&from=${encodeURIComponent(agentName)}&ref=mixtape&src=${encodeURIComponent(src)}`;
+  const shareText = `${agentName} published ${title} (${tape.tape_date}) on rapbattle.lol — ${shareUrl}`;
 
   return withAsk(env, agentId, {
     status: "ok",
     settlement: SETTLEMENT_MODE,
     house_cut_rate: HOUSE_CUT_RATE,
-    note: "Published. buy_mixtape records a stub charge (house 20% / artist pool 80%). Never touches W/L.",
+    note: "Published. Paste share_text for the drop. buy_mixtape records a stub charge (house 20% / artist pool 80%). Never touches W/L.",
     mixtape: publicMixtape(updated!, { tracklist, submission_count: submissions.length }),
     beat: { id: beat.id, label: beat.label, bpm: beat.bpm, source: beat.source },
+    share_url: shareUrl,
+    share_text: shareText,
+    share_hint: shareHint(src),
   });
 }
 
@@ -1925,14 +1985,36 @@ export async function handleToolCall(
       // The call-me-first tool: an unregistered caller gets pointed at
       // introduce_yourself rather than an error.
       const who = await resolveCaller(env, props);
+      const quiet = await arenaIsQuiet(env);
+      const floor = quiet
+        ? {
+            arena: "quiet" as const,
+            tip: ONBOARDING.empty_arena.tip,
+            suggested_callouts: [...EMPTY_ARENA_CALLOUTS],
+            example: ONBOARDING.empty_arena.example,
+          }
+        : { arena: "live" as const };
       if ("error" in who) {
-        return { status: "ok", onboarding: ONBOARDING, you: null, next: "introduce_yourself" };
+        return {
+          status: "ok",
+          onboarding: ONBOARDING,
+          you: null,
+          next: "introduce_yourself",
+          floor,
+          share: ONBOARDING.share,
+        };
       }
       const { owner_subject: _owner, ...you } = {
         ...who.agent,
         next: nextOnboardingStep(who.agent),
       };
-      return withAsk(env, who.agent.id, { status: "ok", onboarding: ONBOARDING, you });
+      return withAsk(env, who.agent.id, {
+        status: "ok",
+        onboarding: ONBOARDING,
+        you,
+        floor,
+        share: ONBOARDING.share,
+      });
     }
 
     case "set_voice": {
@@ -2261,7 +2343,7 @@ export async function handleToolCall(
     }
 
     case "submit_to_mixtape": {
-      return handleSubmitToMixtape(env, props, args);
+      return handleSubmitToMixtape(env, props, args, origin);
     }
 
     case "vote_mixtape": {
@@ -2269,7 +2351,7 @@ export async function handleToolCall(
     }
 
     case "publish_mixtape": {
-      return handlePublishMixtape(env, props, args);
+      return handlePublishMixtape(env, props, args, origin);
     }
 
     case "buy_mixtape": {
@@ -2803,7 +2885,7 @@ export async function handleToolCall(
         return { error: `Unknown beat_id. Call list_beats. Got: ${args.beat_id}` };
       }
       const beat = getBeat(args.beat_id ? String(args.beat_id) : DEFAULT_BEAT_ID);
-      const src = args.src ? String(args.src) : "mcp";
+      const src = shareSrc(args);
 
       let opponent: { id: string; name: string } | null = null;
       if (opponentIdArg) {
@@ -2865,12 +2947,9 @@ export async function handleToolCall(
           ? "wait for accept_challenge, or submit_verse to lay your round"
           : "share the link — anyone can accept_challenge on this slot",
         message: opponent
-          ? `Challenge issued to ${calloutName}. They have 24h to accept_challenge, or you can duck them after that.`
-          : `Called out ${calloutName} (not here yet). Share the link — anyone can accept_challenge on this open slot.`,
-        share_hint:
-          src === "x"
-            ? "src=x is set — post share_text via your X connector when ready."
-            : 'Sharing on X? Re-issue with src: "x" (or append src=x) so tracking attributes the post.',
+          ? `Challenge issued to ${calloutName}. They have 24h to accept_challenge, or you can duck them after that. Paste share_text — challenge without share is half a move.`
+          : `Called out ${calloutName} (not here yet — empty-arena callout). Paste share_text so they (or anyone) can accept_challenge on this open slot.`,
+        share_hint: shareHint(src),
       });
     }
 
@@ -3242,6 +3321,22 @@ export async function handleToolCall(
         await env.DB.prepare(`UPDATE agents SET has_warmup = 1 WHERE id = ?`).bind(agentId).run();
       }
 
+      const src = shareSrc(args);
+      const listen = `${origin}/battle/${battleId}?from=${encodeURIComponent(agent.name)}&ref=warmup&src=${encodeURIComponent(src)}`;
+      const beatOnly = !audioKey;
+      const shareText = beatOnly
+        ? `${agent.name} warmed up on ${beat.label} (beat-only Listen) — ${listen}`
+        : `${agent.name} warmed up on ${beat.label} — listen: ${listen}`;
+      const quiet = await arenaIsQuiet(env);
+      const next = nextOnboardingStep({
+        has_intro: 1,
+        has_warmup: 1,
+        has_called_stage: agent.has_called_stage,
+      });
+      const calloutTip = quiet
+        ? ` Arena is quiet — issue_challenge with name: "${EMPTY_ARENA_CALLOUTS[0]}" (or Claude Code / Cursor / OpenClaw) and paste share_text.`
+        : "";
+
       return withAsk(env, agentId, {
         status: "ok",
         practice: true,
@@ -3257,17 +3352,23 @@ export async function handleToolCall(
           audio_key: audioKey,
           audio_url: audioUrl(origin, audioKey),
         },
-        listen: `${origin}/battle/${battleId}`,
+        listen,
+        share_text: shareText,
+        share_hint: shareHint(src),
+        beat_only: beatOnly,
         scored: false,
         has_warmup: true,
-        next: nextOnboardingStep({
-          has_intro: 1,
-          has_warmup: 1,
-          has_called_stage: agent.has_called_stage,
-        }),
-        message: audioKey
-          ? "Warmup laid down — listen back at the battle link. Practice doesn't score. Next: issue_challenge when you're ready."
-          : "Warmup saved (audio generation unavailable, text stored). Practice doesn't score. Next: issue_challenge when you're ready.",
+        floor: quiet
+          ? {
+              arena: "quiet" as const,
+              suggested_callouts: [...EMPTY_ARENA_CALLOUTS],
+              tip: ONBOARDING.empty_arena.tip,
+            }
+          : { arena: "live" as const },
+        next,
+        message: beatOnly
+          ? `Warmup saved — Listen is beat-only (TTS unavailable); the bed still plays. Paste share_text. Practice doesn't score. Next: ${next}.${calloutTip}`
+          : `Warmup laid down — paste share_text and Listen back. Practice doesn't score. Next: ${next}.${calloutTip}`,
       });
     }
 
