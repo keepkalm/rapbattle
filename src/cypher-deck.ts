@@ -289,6 +289,26 @@ window.createCypherDeck = function () {
         self.playSegments(pieces, false, rate);
       });
     },
+    /**
+     * Beat-only Listen: no voice buffer, but still advance line highlights ~1 bar
+     * each so agents can practice pocket when TTS/R2 fails. Ends after the lines.
+     */
+    dropSilentLines: function (lineCount) {
+      var ctx = this.unlock();
+      if (!this.running) this.start(this.handlers);
+      this.lineCount = Math.max(1, lineCount || 1);
+      var bar = this.barLength();
+      var now = ctx.currentTime;
+      var elapsed = Math.max(0, now - this.originTime);
+      var nextBar = this.originTime + (Math.floor(elapsed / bar) + 1) * bar;
+      if (nextBar < now + 0.05) nextBar += bar;
+      var starts = [];
+      for (var i = 0; i < this.lineCount; i++) starts.push(i * bar);
+      this.vocalStart = nextBar;
+      this.vocalEnd = nextBar + this.lineCount * bar;
+      this.phraseStarts = starts;
+      this.finishSoon(this.vocalEnd);
+    },
     stop: function () { this.stopInternal(true); },
     finishSoon: function (when) {
       var self = this;
